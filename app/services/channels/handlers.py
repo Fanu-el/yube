@@ -13,7 +13,14 @@ from telegram.constants import ParseMode
 
 from app.services.cache import get_cache, set_cache
 from app.utils import html_escape
-from app.services.youtube import get_channel_info, get_latest_videos, get_playlists, resolve_channel_id
+from app.services.youtube import (
+    get_channel_info,
+    get_latest_videos,
+    get_playlist_items,
+    get_video_stats,
+    get_playlists,
+    resolve_channel_id,
+)
 
 logger = logging.getLogger(__name__)
 ITEMS_PER_PAGE = 5
@@ -25,14 +32,24 @@ def format_channel_info(info: dict, playlists_count: int, videos_count: int) -> 
     """Format channel info with interactive buttons."""
     name = html_escape(info["name"])
     description = html_escape(info["description"][:300])
-    
+    created = info.get("published_at")
+    country = info.get("country")
+
     message = (
         f"<b>🎬 {name}</b>\n\n"
         f"<b>📊 Statistics:</b>\n"
         f"👥 Subscribers: <b>{int(info['subscribers']):,}</b>\n"
         f"🎬 Total Videos: <b>{int(info['total_videos']):,}</b>\n"
-        f"👁️ Total Views: <b>{int(info['total_views']):,}</b>\n\n"
-        f"<b>📝 Description:</b>\n{description}"
+        f"👁️ Total Views: <b>{int(info['total_views']):,}</b>\n"
+    )
+
+    if created:
+        message += f"\n🗓 Created: <b>{html_escape(created.split('T')[0])}</b>"
+    if country:
+        message += f"\n🌍 Country: <b>{html_escape(country)}</b>"
+
+    message += (
+        f"\n\n<b>📝 Description:</b>\n{description}"
     )
     
     keyboard = InlineKeyboardMarkup([
@@ -65,17 +82,79 @@ def format_playlists_page(playlists: List[dict], page: int) -> tuple[str, Inline
         f"<b>Page {page + 1} of {total_pages}</b> (showing {end_idx - start_idx} of {len(playlists)})"
     )
     
-    # Build pagination keyboard
+    # Build playlist selection rows and pagination keyboard
+    keyboard_rows = [
+        [InlineKeyboardButton(
+            f"▶ {html_escape(pl['title'])[:30]}",
+            callback_data=f"playlist_{pl['playlist_id']}_0",
+        )]
+        for pl in page_playlists
+    ]
+
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"playlists_{page - 1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"playlists_{page + 1}"))
+    nav_buttons.append(InlineKeyboardButton("🔙 Channel", callback_data="channel_info"))
+    keyboard_rows.append(nav_buttons)
+
+    keyboard = InlineKeyboardMarkup(keyboard_rows)
+    return message, keyboard
+
+
+def format_playlist_items_page(items: List[dict], page: int, playlist_id: str, playlist_title: str) -> tuple[str, InlineKeyboardMarkup]:
+    total_pages = (len(items) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+    start_idx = page * ITEMS_PER_PAGE
+    end_idx = min(start_idx + ITEMS_PER_PAGE, len(items))
+
+    page_items = items[start_idx:end_idx]
+    item_lines = "\n".join(
+        f"<b>{i + start_idx + 1}.</b> <a href=\"{html_escape(item['url'])}\">{html_escape(item['title'])}</a>"
+        for i, item in enumerate(page_items)
+    ) or "No videos found."
+
+    message = (
+        f"<b>📺 Playlist: {html_escape(playlist_title)}</b>\n\n"
+        f"{item_lines}\n\n"
+        f"<b>Page {page + 1} of {total_pages}</b> (showing {end_idx - start_idx} of {len(items)})"
+    )
+
     buttons = []
     if page > 0:
-        buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"playlists_{page - 1}"))
+        buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"playlist_items_{playlist_id}_{page - 1}"))
     if page < total_pages - 1:
-        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"playlists_{page + 1}"))
+        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"playlist_items_{playlist_id}_{page + 1}"))
+
+    buttons.append(InlineKeyboardButton("🔙 Playlists", callback_data="playlists_0"))
+    buttons.append(InlineKeyboardButton("🔙 Channel", callback_data="channel_info"))
     
-    buttons.append(InlineKeyboardButton("🔙 Back", callback_data="channel_info"))
-    
-    keyboard = InlineKeyboardMarkup([buttons]) if buttons else InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="channel_info")]])
-    
+    keyboard = InlineKeyboardMarkup([buttons])
+    return message, keyboard
+
+
+def format_video_detail(video: dict, stats: dict, page: int) -> tuple[str, InlineKeyboardMarkup]:
+    title = html_escape(video["title"])
+    duration = html_escape(stats.get("duration", "N/A"))
+    published = stats.get("published_at")
+    published_text = html_escape(published.split("T")[0]) if published else "Unknown"
+
+    message = (
+        f"<b>▶ {title}</b>\n\n"
+        f"<b>📅 Published:</b> {published_text}\n"
+        f"<b>⏱ Duration:</b> {duration}\n"
+        f"<b>👁 Views:</b> <b>{int(stats.get('views', '0')):,}</b>\n"
+        f"<b>👍 Likes:</b> <b>{int(stats.get('likes', '0')):,}</b>\n"
+        f"<b>💬 Comments:</b> <b>{int(stats.get('comments', '0')):,}</b>\n\n"
+        f"<a href=\"{html_escape(video['url'])}\">Watch on YouTube</a>"
+    )
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔙 Videos", callback_data=f"videos_{page}"),
+            InlineKeyboardButton("🔙 Channel", callback_data="channel_info"),
+        ]
+    ])
     return message, keyboard
 
 
@@ -84,31 +163,37 @@ def format_videos_page(videos: List[dict], page: int) -> tuple[str, InlineKeyboa
     total_pages = (len(videos) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
     start_idx = page * ITEMS_PER_PAGE
     end_idx = min(start_idx + ITEMS_PER_PAGE, len(videos))
-    
+
     page_videos = videos[start_idx:end_idx]
-    
+
     video_lines = "\n".join(
         f"<b>{i + start_idx + 1}.</b> <a href=\"{html_escape(video['url'])}\">{html_escape(video['title'])}</a>"
         for i, video in enumerate(page_videos)
     ) or "No videos found."
-    
+
     message = (
         f"<b>✨ Latest Videos</b>\n\n"
         f"{video_lines}\n\n"
         f"<b>Page {page + 1} of {total_pages}</b> (showing {end_idx - start_idx} of {len(videos)})"
     )
-    
-    # Build pagination keyboard
-    buttons = []
+
+    keyboard_rows = [
+        [InlineKeyboardButton(
+            f"▶ {html_escape(video['title'])[:30]}",
+            callback_data=f"video_{video['video_id']}_{page}",
+        )]
+        for video in page_videos
+    ]
+
+    nav_buttons = []
     if page > 0:
-        buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"videos_{page - 1}"))
+        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"videos_{page - 1}"))
     if page < total_pages - 1:
-        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"videos_{page + 1}"))
-    
-    buttons.append(InlineKeyboardButton("🔙 Back", callback_data="channel_info"))
-    
-    keyboard = InlineKeyboardMarkup([buttons]) if buttons else InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="channel_info")]])
-    
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"videos_{page + 1}"))
+    nav_buttons.append(InlineKeyboardButton("🔙 Channel", callback_data="channel_info"))
+    keyboard_rows.append(nav_buttons)
+
+    keyboard = InlineKeyboardMarkup(keyboard_rows)
     return message, keyboard
 
 
@@ -149,6 +234,45 @@ async def handle_callback_query(update: Update) -> None:
 
         if data == "channel_info":
             message, keyboard = format_channel_info(info, len(playlists), len(videos))
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        elif data.startswith("playlist_items_"):
+            payload = data[len("playlist_items_"):]
+            playlist_id, page_text = payload.rsplit("_", 1)
+            page = int(page_text)
+            playlist_title = next(
+                (pl["title"] for pl in playlists if pl["playlist_id"] == playlist_id),
+                "Playlist",
+            )
+            playlist_items = channel_data.get("playlist_items", {}).get(playlist_id)
+            if playlist_items is None:
+                playlist_items = await get_playlist_items(playlist_id)
+                channel_data.setdefault("playlist_items", {})[playlist_id] = playlist_items
+                await set_cache(user_channel_key, channel_data, ttl=3600)
+            message, keyboard = format_playlist_items_page(playlist_items, page, playlist_id, playlist_title)
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        elif data.startswith("playlist_"):
+            payload = data[len("playlist_"):]
+            playlist_id, page_text = payload.rsplit("_", 1)
+            page = int(page_text)
+            playlist_title = next(
+                (pl["title"] for pl in playlists if pl["playlist_id"] == playlist_id),
+                "Playlist",
+            )
+            playlist_items = await get_playlist_items(playlist_id)
+            channel_data.setdefault("playlist_items", {})[playlist_id] = playlist_items
+            await set_cache(user_channel_key, channel_data, ttl=3600)
+            message, keyboard = format_playlist_items_page(playlist_items, page, playlist_id, playlist_title)
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        elif data.startswith("video_"):
+            payload = data[len("video_"):]
+            video_id, page_text = payload.rsplit("_", 1)
+            page = int(page_text)
+            video = next((v for v in videos if v["video_id"] == video_id), None)
+            if not video:
+                await query.edit_message_text("❌ Video not found or session expired.")
+                return
+            stats = await get_video_stats(video_id)
+            message, keyboard = format_video_detail(video, stats, page)
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         elif data.startswith("playlists_"):
             page = int(data.split("_")[1])

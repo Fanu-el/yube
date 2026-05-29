@@ -75,6 +75,8 @@ async def get_channel_info(channel_id: str) -> Dict[str, Any]:
         "subscribers": channel["statistics"].get("subscriberCount", "0"),
         "total_videos": channel["statistics"].get("videoCount", "0"),
         "total_views": channel["statistics"].get("viewCount", "0"),
+        "published_at": channel["snippet"].get("publishedAt"),
+        "country": channel["snippet"].get("country"),
         "uploads_playlist_id": channel["contentDetails"]["relatedPlaylists"].get("uploads"),
     }
     await set_cache(cache_key, result, ttl=900)
@@ -106,6 +108,33 @@ async def get_playlists(channel_id: str) -> List[Dict[str, Any]]:
     return playlists
 
 
+async def get_playlist_items(playlist_id: str, max_results: int = 50) -> List[Dict[str, Any]]:
+    cache_key = f"youtube:playlist:items:{playlist_id}"
+    cached = await get_cache(cache_key)
+    if cached:
+        return cached
+
+    request = youtube.playlistItems().list(
+        part="snippet",
+        playlistId=playlist_id,
+        maxResults=max_results,
+    )
+    response = await _execute_youtube(request)
+    items = [
+        {
+            "title": item["snippet"]["title"],
+            "url": f"https://youtube.com/watch?v={item['snippet']['resourceId']['videoId']}",
+            "video_id": item["snippet"]["resourceId"]["videoId"],
+            "published": item["snippet"].get("publishedAt"),
+            "thumbnail": item["snippet"]["thumbnails"]["medium"]["url"],
+        }
+        for item in response.get("items", [])
+        if item.get("snippet", {}).get("resourceId", {}).get("videoId")
+    ]
+    await set_cache(cache_key, items, ttl=300)
+    return items
+
+
 async def get_latest_videos(channel_id: str, max_results: int = 10) -> List[Dict[str, Any]]:
     cache_key = f"youtube:channel:latest:{channel_id}:{max_results}"
     cached = await get_cache(cache_key)
@@ -124,6 +153,7 @@ async def get_latest_videos(channel_id: str, max_results: int = 10) -> List[Dict
         {
             "title": item["snippet"]["title"],
             "url": f"https://youtube.com/watch?v={item['id']['videoId']}",
+            "video_id": item["id"]["videoId"],
             "published": item["snippet"].get("publishedAt"),
             "thumbnail": item["snippet"]["thumbnails"]["medium"]["url"],
         }
@@ -131,6 +161,19 @@ async def get_latest_videos(channel_id: str, max_results: int = 10) -> List[Dict
     ]
     await set_cache(cache_key, videos, ttl=300)
     return videos
+
+
+async def _format_duration(duration: str) -> str:
+    match = re.match(r"PT(?:(?P<h>\d+)H)?(?:(?P<m>\d+)M)?(?:(?P<s>\d+)S)?$", duration or "")
+    if not match:
+        return "N/A"
+
+    hours = int(match.group("h") or 0)
+    minutes = int(match.group("m") or 0)
+    seconds = int(match.group("s") or 0)
+    if hours:
+        return f"{hours}:{minutes:02}:{seconds:02}"
+    return f"{minutes}:{seconds:02}"
 
 
 async def get_video_stats(video_id: str) -> Dict[str, Any]:
@@ -149,5 +192,6 @@ async def get_video_stats(video_id: str) -> Dict[str, Any]:
         "views": video["statistics"].get("viewCount", "0"),
         "likes": video["statistics"].get("likeCount", "0"),
         "comments": video["statistics"].get("commentCount", "0"),
-        "duration": video["contentDetails"]["duration"],
+        "duration": await _format_duration(video["contentDetails"].get("duration", "")),
+        "published_at": video["snippet"].get("publishedAt"),
     }

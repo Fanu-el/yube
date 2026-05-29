@@ -92,8 +92,23 @@ def mock_videos():
         {
             "title": f"Video {i}",
             "url": f"https://youtube.com/watch?v=vid{i}",
+            "video_id": f"vid{i}",
             "published": "2024-01-01T00:00:00Z",
             "thumbnail": f"https://img.youtube.com/vi/vid{i}/default.jpg",
         }
         for i in range(1, 26)  # 25 videos for pagination testing
+    ]
+
+
+@pytest.fixture
+def mock_playlist_items():
+    """Mock playlist item response."""
+    return [
+        {
+            "title": f"Playlist Video {i}",
+            "url": f"https://youtube.com/watch?v=plvid{i}",
+            "published": "2024-01-01T00:00:00Z",
+            "thumbnail": f"https://img.youtube.com/vi/plvid{i}/default.jpg",
+        }
+        for i in range(1, 21)
     ]
