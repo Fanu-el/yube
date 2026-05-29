@@ -1,6 +1,4 @@
 """Tests for telegram service handlers and formatting."""
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from app.services.telegram import (
     format_channel_info,

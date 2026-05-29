@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from app.services.cache import get_cache, set_cache
 from googleapiclient.discovery import build

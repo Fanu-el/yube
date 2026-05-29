@@ -2,7 +2,6 @@
 import os
 import sys
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 # Ensure the project root is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,8 +13,6 @@ os.environ["REDIS_URL"] = "redis://localhost:6379/0"
 os.environ["WEBHOOK_URL"] = "https://example.com"
 
 # Import after setting env vars and path
-from telegram import Bot, Update, User, Chat, Message
-from telegram.constants import ParseMode
 
 
 @pytest.fixture
