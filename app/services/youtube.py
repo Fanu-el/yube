@@ -2,7 +2,7 @@ import asyncio
 import re
 from typing import Any, Dict, List, Optional
 
-from app.cache import get_cache, set_cache
+from app.services.cache import get_cache, set_cache
 from googleapiclient.discovery import build
 from app.settings import settings
 

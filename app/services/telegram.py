@@ -5,7 +5,7 @@ from typing import List
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode
 
-from app.cache import get_cache, set_cache
+from app.services.cache import get_cache, set_cache
 from app.utils import html_escape
 from app.services.youtube import get_channel_info, get_latest_videos, get_playlists, resolve_channel_id
 
