@@ -342,6 +342,38 @@ class TestCallbackHandler:
                 mock_update_callback.callback_query.edit_message_text.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_handle_callback_playlist_video_detail(self, mock_update_callback, mock_channel_info, mock_playlists, mock_playlist_items):
+        """Test opening a playlist video loads video detail."""
+        playlist_id = mock_playlists[0]["playlist_id"]
+        video_id = mock_playlist_items[0]["video_id"]
+        mock_update_callback.callback_query.data = f"video_{video_id}_playlist_{playlist_id}_0"
+        mock_update_callback.callback_query.from_user.id = 123
+
+        channel_data = {
+            "channel_id": "UCtest123",
+            "info": mock_channel_info,
+            "playlists": mock_playlists,
+            "videos": [],
+            "playlist_items": {playlist_id: mock_playlist_items},
+        }
+
+        with patch("app.services.channels.handlers.get_cache", new_callable=AsyncMock) as mock_get:
+            with patch("app.services.channels.handlers.get_video_stats", new_callable=AsyncMock) as mock_get_stats:
+                mock_get.return_value = channel_data
+                mock_get_stats.return_value = {
+                    "views": "1000",
+                    "likes": "100",
+                    "comments": "10",
+                    "duration": "3:45",
+                    "published_at": "2024-01-01T00:00:00Z",
+                }
+
+                await handle_callback_query(mock_update_callback)
+
+                mock_get_stats.assert_called_once_with(video_id)
+                mock_update_callback.callback_query.edit_message_text.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_handle_callback_session_expired(self, mock_update_callback):
         """Test callback with expired session."""
         mock_update_callback.callback_query.from_user.id = 123
