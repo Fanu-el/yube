@@ -5,6 +5,8 @@ from telegram.constants import ParseMode
 
 from app.services.telegram import (
     format_channel_info,
+    format_playlist_items_page,
+    format_video_detail,
     format_playlists_page,
     format_videos_page,
     handle_start_command,
@@ -72,6 +74,22 @@ class TestFormatFunctions:
         texts = [btn.text for row in keyboard.inline_keyboard for btn in row]
         assert any("Previous" in t for t in texts)
         assert not any("Next" in t for t in texts)
+
+    def test_format_playlists_page_includes_open_buttons(self, mock_playlists):
+        """Playlist page should include open playlist buttons."""
+        _, keyboard = format_playlists_page(mock_playlists, 0)
+        buttons = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        assert any(btn_text.startswith("▶") for btn_text in buttons)
+
+    def test_format_playlist_items_page(self, mock_playlist_items):
+        """Test playlist item page formatting."""
+        message, keyboard = format_playlist_items_page(mock_playlist_items, 0, "PLtest1", "Test Playlist")
+
+        assert "📺 Playlist: Test Playlist" in message
+        assert "Playlist Video 1" in message
+        texts = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        assert any("Playlists" in t for t in texts)
+        assert any("Channel" in t for t in texts)
     
     def test_format_videos_page(self, mock_videos):
         """Test videos pagination."""
@@ -80,7 +98,24 @@ class TestFormatFunctions:
         assert "✨ Latest Videos" in message
         assert "Page 1 of 5" in message  # 25 videos / 5 per page = 5 pages
         assert "Video 1" in message
-        assert "Video 5" in message
+        buttons = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        assert any(btn_text.startswith("▶") for btn_text in buttons)
+
+    def test_format_video_detail(self, mock_videos):
+        """Test video detail formatting."""
+        stats = {
+            "views": "1234",
+            "likes": "100",
+            "comments": "5",
+            "duration": "3:45",
+            "published_at": "2024-01-01T00:00:00Z",
+        }
+        message, keyboard = format_video_detail(mock_videos[0], stats, 0)
+
+        assert "▶ Video 1" in message
+        assert "⏱ Duration:" in message
+        assert "👁 Views:" in message
+        assert "🔙 Videos" in [btn.text for row in keyboard.inline_keyboard for btn in row]
 
 
 class TestCommandHandlers:
@@ -178,13 +213,13 @@ class TestChannelHandler:
         mock_update_message.message.reply_text = AsyncMock()
         mock_update_message.message.from_user.id = 123
         
-        with patch("app.services.telegram.get_cache", new_callable=AsyncMock) as mock_get_cache:
+        with patch("app.services.channels.handlers.get_cache", new_callable=AsyncMock) as mock_get_cache:
             mock_get_cache.return_value = {"awaiting": "channel_search"}
-            with patch("app.services.telegram.resolve_channel_id", new_callable=AsyncMock) as mock_resolve:
-                with patch("app.services.telegram.get_channel_info", new_callable=AsyncMock) as mock_info:
-                    with patch("app.services.telegram.get_playlists", new_callable=AsyncMock) as mock_pl:
-                        with patch("app.services.telegram.get_latest_videos", new_callable=AsyncMock) as mock_vids:
-                            with patch("app.services.telegram.set_cache", new_callable=AsyncMock):
+            with patch("app.services.channels.handlers.resolve_channel_id", new_callable=AsyncMock) as mock_resolve:
+                with patch("app.services.channels.handlers.get_channel_info", new_callable=AsyncMock) as mock_info:
+                    with patch("app.services.channels.handlers.get_playlists", new_callable=AsyncMock) as mock_pl:
+                        with patch("app.services.channels.handlers.get_latest_videos", new_callable=AsyncMock) as mock_vids:
+                            with patch("app.services.channels.handlers.set_cache", new_callable=AsyncMock):
                                 mock_resolve.return_value = "UCtest123"
                                 mock_info.return_value = mock_channel_info
                                 mock_pl.return_value = mock_playlists
@@ -214,11 +249,11 @@ class TestChannelHandler:
         mock_update_message.message.reply_text = AsyncMock()
         mock_update_message.message.from_user.id = 123
         
-        with patch("app.services.telegram.get_cache", new_callable=AsyncMock) as mock_get_cache:
+        with patch("app.services.channels.handlers.get_cache", new_callable=AsyncMock) as mock_get_cache:
             mock_get_cache.return_value = {"awaiting": "channel_search"}
-            with patch("app.services.telegram.resolve_channel_id", new_callable=AsyncMock) as mock_resolve:
+            with patch("app.services.channels.handlers.resolve_channel_id", new_callable=AsyncMock) as mock_resolve:
                 mock_resolve.side_effect = ValueError("Channel not found")
-                with patch("app.services.telegram.set_cache", new_callable=AsyncMock):
+                with patch("app.services.channels.handlers.set_cache", new_callable=AsyncMock):
 
                     await handle_channel(mock_update_message)
 
@@ -243,20 +278,75 @@ class TestCallbackHandler:
             "videos": mock_videos,
         }
         
-        with patch("app.services.telegram.get_cache", new_callable=AsyncMock) as mock_get:
+        with patch("app.services.channels.handlers.get_cache", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = channel_data
             
             await handle_callback_query(mock_update_callback)
             
             mock_update_callback.callback_query.answer.assert_called_once()
             mock_update_callback.callback_query.edit_message_text.assert_called_once()
-    
+
+    @pytest.mark.asyncio
+    async def test_handle_callback_open_playlist(self, mock_update_callback, mock_channel_info, mock_playlists, mock_playlist_items):
+        """Test opening a playlist loads playlist items."""
+        playlist_id = mock_playlists[0]["playlist_id"]
+        mock_update_callback.callback_query.data = f"playlist_{playlist_id}_0"
+        mock_update_callback.callback_query.from_user.id = 123
+
+        channel_data = {
+            "channel_id": "UCtest123",
+            "info": mock_channel_info,
+            "playlists": mock_playlists,
+            "videos": [],
+        }
+
+        with patch("app.services.channels.handlers.get_cache", new_callable=AsyncMock) as mock_get:
+            with patch("app.services.channels.handlers.get_playlist_items", new_callable=AsyncMock) as mock_playlist_items_fn:
+                with patch("app.services.channels.handlers.set_cache", new_callable=AsyncMock) as mock_set:
+                    mock_get.return_value = channel_data
+                    mock_playlist_items_fn.return_value = mock_playlist_items
+
+                    await handle_callback_query(mock_update_callback)
+
+                    mock_playlist_items_fn.assert_called_once_with(playlist_id)
+                    mock_update_callback.callback_query.edit_message_text.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_callback_open_video_detail(self, mock_update_callback, mock_channel_info, mock_playlists, mock_videos):
+        """Test opening a video loads video detail."""
+        video_id = mock_videos[0]["video_id"]
+        mock_update_callback.callback_query.data = f"video_{video_id}_0"
+        mock_update_callback.callback_query.from_user.id = 123
+
+        channel_data = {
+            "channel_id": "UCtest123",
+            "info": mock_channel_info,
+            "playlists": mock_playlists,
+            "videos": mock_videos,
+        }
+
+        with patch("app.services.channels.handlers.get_cache", new_callable=AsyncMock) as mock_get:
+            with patch("app.services.channels.handlers.get_video_stats", new_callable=AsyncMock) as mock_get_stats:
+                mock_get.return_value = channel_data
+                mock_get_stats.return_value = {
+                    "views": "1000",
+                    "likes": "100",
+                    "comments": "10",
+                    "duration": "3:45",
+                    "published_at": "2024-01-01T00:00:00Z",
+                }
+
+                await handle_callback_query(mock_update_callback)
+
+                mock_get_stats.assert_called_once_with(video_id)
+                mock_update_callback.callback_query.edit_message_text.assert_called_once()
+
     @pytest.mark.asyncio
     async def test_handle_callback_session_expired(self, mock_update_callback):
         """Test callback with expired session."""
         mock_update_callback.callback_query.from_user.id = 123
         
-        with patch("app.services.telegram.get_cache", new_callable=AsyncMock) as mock_get:
+        with patch("app.services.channels.handlers.get_cache", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = None  # Session expired
             
             await handle_callback_query(mock_update_callback)
@@ -270,7 +360,7 @@ class TestCallbackHandler:
         mock_update_callback.callback_query.data = "action_channels"
         mock_update_callback.callback_query.from_user.id = 123
 
-        with patch("app.services.telegram.set_cache", new_callable=AsyncMock) as mock_set:
+        with patch("app.services.channels.handlers.set_cache", new_callable=AsyncMock) as mock_set:
             await handle_callback_query(mock_update_callback)
 
             # set_cache should be called to mark awaiting state
@@ -291,8 +381,8 @@ class TestInlineHandler:
         update = MagicMock()
         update.inline_query = inline
 
-        with patch("app.services.telegram.resolve_channel_id", new_callable=AsyncMock) as mock_resolve:
-            with patch("app.services.telegram.get_channel_info", new_callable=AsyncMock) as mock_info:
+        with patch("app.services.channels.handlers.resolve_channel_id", new_callable=AsyncMock) as mock_resolve:
+            with patch("app.services.channels.handlers.get_channel_info", new_callable=AsyncMock) as mock_info:
                 mock_resolve.return_value = "UCtest123"
                 mock_info.return_value = {
                     "name": "Test Channel",

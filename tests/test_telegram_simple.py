@@ -58,7 +58,7 @@ class TestFormatFunctions:
         assert "Page 3 of 3" in message
         assert "Playlist 11" in message
         buttons_text = " ".join(btn.text for row in keyboard.inline_keyboard for btn in row)
-        assert "Back" in buttons_text
+        assert "Previous" in buttons_text
     
     def test_format_videos_page(self, mock_videos):
         """Test videos pagination."""
