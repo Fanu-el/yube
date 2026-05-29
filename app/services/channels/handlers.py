@@ -28,10 +28,75 @@ SESSION_STATE_PREFIX = "telegram:state:"
 SESSION_CHANNEL_PREFIX = "telegram:channel:"
 
 
+def format_main_menu() -> tuple[str, InlineKeyboardMarkup]:
+    message = (
+        "<b>🏠 Main Menu</b>\n\n"
+        "Send a channel name, URL, or channel ID to search.\n"
+        "Example: <code>YouTube</code> or <code>https://youtube.com/channel/UC...</code>\n\n"
+        "Use the buttons below for quick navigation."
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔎 Channels", callback_data="action_channels")],
+        [InlineKeyboardButton("❓ Help", callback_data="action_help")],
+        [InlineKeyboardButton("ℹ️ About", callback_data="action_about")],
+    ])
+    return message, keyboard
+
+
+def format_help_message() -> tuple[str, InlineKeyboardMarkup]:
+    message = (
+        "<b>📖 Help</b>\n\n"
+        "Send a channel name, URL, or channel ID to see channel stats, description, playlists, and latest uploads.\n\n"
+        "<b>Commands:</b>\n"
+        "/start - Show welcome message\n"
+        "/help - Show this help screen\n"
+        "/about - About this bot\n"
+        "/menu or / - Show the action menu\n\n"
+        "You can also click the buttons below."
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔎 Channels", callback_data="action_channels")],
+        [InlineKeyboardButton("🏠 Home", callback_data="action_home")],
+    ])
+    return message, keyboard
+
+
+def format_about_message() -> tuple[str, InlineKeyboardMarkup]:
+    message = (
+        "<b>ℹ️ About yube</b>\n\n"
+        "yube is a Telegram bot for discovering YouTube channel information quickly.\n\n"
+        "Features:\n"
+        "• Fast channel lookup by name, URL, or ID\n"
+        "• Channel statistics and description\n"
+        "• Playlist browsing with pagination\n"
+        "• Latest uploads and video details\n"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔎 Channels", callback_data="action_channels")],
+        [InlineKeyboardButton("🏠 Home", callback_data="action_home")],
+    ])
+    return message, keyboard
+
+
+def format_full_description(info: dict) -> tuple[str, InlineKeyboardMarkup]:
+    description = info.get("description", "")
+    message = (
+        f"<b>📌 Full description for {html_escape(info['name'])}</b>\n\n"
+        f"{html_escape(description or 'No description available.')}."
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Channel", callback_data="channel_info")],
+        [InlineKeyboardButton("🏠 Home", callback_data="action_home")],
+    ])
+    return message, keyboard
+
+
 def format_channel_info(info: dict, playlists_count: int, videos_count: int) -> tuple[str, InlineKeyboardMarkup]:
     """Format channel info with interactive buttons."""
     name = html_escape(info["name"])
-    description = html_escape(info["description"][:300])
+    raw_description = info.get("description", "")
+    description = raw_description[:300]
+    truncated = len(raw_description) > 300
     created = info.get("published_at")
     country = info.get("country")
 
@@ -48,17 +113,25 @@ def format_channel_info(info: dict, playlists_count: int, videos_count: int) -> 
     if country:
         message += f"\n🌍 Country: <b>{html_escape(country)}</b>"
 
-    message += (
-        f"\n\n<b>📝 Description:</b>\n{description}"
-    )
-    
-    keyboard = InlineKeyboardMarkup([
+    display_description = html_escape(description) if description else "No description available."
+    if truncated:
+        display_description += "..."
+
+    message += f"\n\n<b>📝 Description:</b>\n{display_description}"
+
+    keyboard_rows = [
         [
             InlineKeyboardButton("📋 Playlists", callback_data="playlists_0"),
             InlineKeyboardButton("✨ Latest Videos", callback_data="videos_0"),
         ]
-    ])
-    
+    ]
+
+    if truncated:
+        keyboard_rows.append([InlineKeyboardButton("📌 More", callback_data="description_more")])
+
+    keyboard_rows.append([InlineKeyboardButton("🏠 Home", callback_data="action_home")])
+
+    keyboard = InlineKeyboardMarkup(keyboard_rows)
     return message, keyboard
 
 
@@ -120,20 +193,32 @@ def format_playlist_items_page(items: List[dict], page: int, playlist_id: str, p
         f"<b>Page {page + 1} of {total_pages}</b> (showing {end_idx - start_idx} of {len(items)})"
     )
 
-    buttons = []
-    if page > 0:
-        buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"playlist_items_{playlist_id}_{page - 1}"))
-    if page < total_pages - 1:
-        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"playlist_items_{playlist_id}_{page + 1}"))
+    keyboard_rows = [
+        [
+            InlineKeyboardButton(
+                f"▶ {html_escape(item['title'])[:30]}",
+                callback_data=f"video_{item['video_id']}_playlist_{playlist_id}_{page}",
+            )
+        ]
+        for item in page_items
+    ]
 
-    buttons.append(InlineKeyboardButton("🔙 Playlists", callback_data="playlists_0"))
-    buttons.append(InlineKeyboardButton("🔙 Channel", callback_data="channel_info"))
-    
-    keyboard = InlineKeyboardMarkup([buttons])
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"playlist_items_{playlist_id}_{page - 1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"playlist_items_{playlist_id}_{page + 1}"))
+
+    nav_buttons.append(InlineKeyboardButton("🔙 Playlists", callback_data="playlists_0"))
+    nav_buttons.append(InlineKeyboardButton("🔙 Channel", callback_data="channel_info"))
+    nav_buttons.append(InlineKeyboardButton("🏠 Home", callback_data="action_home"))
+    keyboard_rows.append(nav_buttons)
+
+    keyboard = InlineKeyboardMarkup(keyboard_rows)
     return message, keyboard
 
 
-def format_video_detail(video: dict, stats: dict, page: int) -> tuple[str, InlineKeyboardMarkup]:
+def format_video_detail(video: dict, stats: dict, page: int, return_callback: str | None = None) -> tuple[str, InlineKeyboardMarkup]:
     title = html_escape(video["title"])
     duration = html_escape(stats.get("duration", "N/A"))
     published = stats.get("published_at")
@@ -149,11 +234,19 @@ def format_video_detail(video: dict, stats: dict, page: int) -> tuple[str, Inlin
         f"<a href=\"{html_escape(video['url'])}\">Watch on YouTube</a>"
     )
 
+    if return_callback is None:
+        return_callback = f"videos_{page}"
+
+    back_text = "🔙 Videos"
+    if return_callback.startswith("playlist_items_"):
+        back_text = "🔙 Playlist"
+
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔙 Videos", callback_data=f"videos_{page}"),
+            InlineKeyboardButton(back_text, callback_data=return_callback),
             InlineKeyboardButton("🔙 Channel", callback_data="channel_info"),
-        ]
+        ],
+        [InlineKeyboardButton("🏠 Home", callback_data="action_home")],
     ])
     return message, keyboard
 
@@ -191,6 +284,7 @@ def format_videos_page(videos: List[dict], page: int) -> tuple[str, InlineKeyboa
     if page < total_pages - 1:
         nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"videos_{page + 1}"))
     nav_buttons.append(InlineKeyboardButton("🔙 Channel", callback_data="channel_info"))
+    nav_buttons.append(InlineKeyboardButton("🏠 Home", callback_data="action_home"))
     keyboard_rows.append(nav_buttons)
 
     keyboard = InlineKeyboardMarkup(keyboard_rows)
@@ -214,6 +308,21 @@ async def handle_callback_query(update: Update) -> None:
             )
             return
 
+        if data == "action_help":
+            message, keyboard = format_help_message()
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            return
+
+        if data == "action_about":
+            message, keyboard = format_about_message()
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            return
+
+        if data == "action_home":
+            message, keyboard = format_main_menu()
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            return
+
         if data == "action_cancel":
             state_key = f"{SESSION_STATE_PREFIX}{query.from_user.id}"
             await set_cache(state_key, None, ttl=1)
@@ -234,6 +343,9 @@ async def handle_callback_query(update: Update) -> None:
 
         if data == "channel_info":
             message, keyboard = format_channel_info(info, len(playlists), len(videos))
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        elif data == "description_more":
+            message, keyboard = format_full_description(info)
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         elif data.startswith("playlist_items_"):
             payload = data[len("playlist_items_"):]
@@ -265,14 +377,33 @@ async def handle_callback_query(update: Update) -> None:
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         elif data.startswith("video_"):
             payload = data[len("video_"):]
-            video_id, page_text = payload.rsplit("_", 1)
-            page = int(page_text)
-            video = next((v for v in videos if v["video_id"] == video_id), None)
+            return_callback = None
+            if "_playlist_" in payload:
+                video_id, rest = payload.split("_playlist_", 1)
+                playlist_id, page_text = rest.rsplit("_", 1)
+                page = int(page_text)
+                return_callback = f"playlist_items_{playlist_id}_{page}"
+                video = next((v for v in videos if v["video_id"] == video_id), None)
+                if video is None:
+                    video = next(
+                        (
+                            item
+                            for item in channel_data.get("playlist_items", {}).get(playlist_id, [])
+                            if item.get("video_id") == video_id
+                        ),
+                        None,
+                    )
+            else:
+                video_id, page_text = payload.rsplit("_", 1)
+                page = int(page_text)
+                return_callback = f"videos_{page}"
+                video = next((v for v in videos if v["video_id"] == video_id), None)
+
             if not video:
                 await query.edit_message_text("❌ Video not found or session expired.")
                 return
             stats = await get_video_stats(video_id)
-            message, keyboard = format_video_detail(video, stats, page)
+            message, keyboard = format_video_detail(video, stats, page, return_callback=return_callback)
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         elif data.startswith("playlists_"):
             page = int(data.split("_")[1])
@@ -326,6 +457,9 @@ async def handle_channel(update: Update) -> None:
         elif command == "/about":
             from app.services.telegram import handle_about_command
             await handle_about_command(update)
+        elif command in ("/menu", "/"):
+            message, keyboard = format_main_menu()
+            await update.message.reply_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         else:
             await update.message.reply_text(
                 "❓ Unknown command. Send /help to see available commands."
@@ -372,8 +506,5 @@ async def handle_channel(update: Update) -> None:
         return
 
     # Otherwise show a simple action menu
-    menu = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔎 Channels", callback_data="action_channels")],
-        [InlineKeyboardButton("/help", callback_data="action_help")],
-    ])
-    await update.message.reply_text("Choose an action:", reply_markup=menu)
+    message, menu = format_main_menu()
+    await update.message.reply_text(message, parse_mode=ParseMode.HTML, reply_markup=menu)

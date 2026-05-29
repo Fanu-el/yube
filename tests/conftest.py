@@ -107,6 +107,7 @@ def mock_playlist_items():
         {
             "title": f"Playlist Video {i}",
             "url": f"https://youtube.com/watch?v=plvid{i}",
+            "video_id": f"plvid{i}",
             "published": "2024-01-01T00:00:00Z",
             "thumbnail": f"https://img.youtube.com/vi/plvid{i}/default.jpg",
         }
