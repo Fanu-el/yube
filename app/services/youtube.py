@@ -18,6 +18,21 @@ async def _execute_youtube(request: Any) -> Dict[str, Any]:
     return await asyncio.to_thread(request.execute)
 
 
+def _get_thumbnail_url(thumbnails: dict) -> str:
+    if not thumbnails:
+        return ""
+    for size in ("medium", "high", "standard", "default"):
+        url = thumbnails.get(size, {}).get("url")
+        if url:
+            return url
+    for thumb in thumbnails.values():
+        if isinstance(thumb, dict):
+            url = thumb.get("url")
+            if url:
+                return url
+    return ""
+
+
 async def resolve_channel_id(user_input: str) -> str:
     lookup_key = f"youtube:resolve:{user_input.strip().lower()}"
     cached = await get_cache(lookup_key)
@@ -126,7 +141,7 @@ async def get_playlist_items(playlist_id: str, max_results: int = 50) -> List[Di
             "url": f"https://youtube.com/watch?v={item['snippet']['resourceId']['videoId']}",
             "video_id": item["snippet"]["resourceId"]["videoId"],
             "published": item["snippet"].get("publishedAt"),
-            "thumbnail": item["snippet"]["thumbnails"]["medium"]["url"],
+            "thumbnail": _get_thumbnail_url(item["snippet"].get("thumbnails", {})),
         }
         for item in response.get("items", [])
         if item.get("snippet", {}).get("resourceId", {}).get("videoId")
@@ -155,7 +170,7 @@ async def get_latest_videos(channel_id: str, max_results: int = 10) -> List[Dict
             "url": f"https://youtube.com/watch?v={item['id']['videoId']}",
             "video_id": item["id"]["videoId"],
             "published": item["snippet"].get("publishedAt"),
-            "thumbnail": item["snippet"]["thumbnails"]["medium"]["url"],
+            "thumbnail": _get_thumbnail_url(item["snippet"].get("thumbnails", {})),
         }
         for item in response.get("items", [])
     ]
