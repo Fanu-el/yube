@@ -119,16 +119,20 @@ def format_channel_info(info: dict, playlists_count: int, videos_count: int) -> 
 
     message += f"\n\n<b>📝 Description:</b>\n{display_description}"
 
-    keyboard_rows = [
-        [
-            InlineKeyboardButton("📋 Playlists", callback_data="playlists_0"),
-            InlineKeyboardButton("✨ Latest Videos", callback_data="videos_0"),
-        ]
-    ]
+    keyboard_rows = []
 
+    # If the description was truncated, show the More button immediately
+    # below the description so it appears at the end of the truncated text.
     if truncated:
         keyboard_rows.append([InlineKeyboardButton("📌 More", callback_data="description_more")])
 
+    # Primary channel actions
+    keyboard_rows.append([
+        InlineKeyboardButton("📋 Playlists", callback_data="playlists_0"),
+        InlineKeyboardButton("✨ Latest Videos", callback_data="videos_0"),
+    ])
+
+    # Home button
     keyboard_rows.append([InlineKeyboardButton("🏠 Home", callback_data="action_home")])
 
     keyboard = InlineKeyboardMarkup(keyboard_rows)
