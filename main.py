@@ -7,7 +7,8 @@ import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from googleapiclient.discovery import build
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings
 from telegram import Bot, Update
 from telegram.constants import ParseMode
 
