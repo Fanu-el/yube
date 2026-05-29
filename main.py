@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from telegram import Bot, Update, BotCommand
 
 from app.settings import settings
-from app.services.telegram import handle_channel, handle_callback_query
+from app.services.telegram import handle_channel, handle_callback_query, handle_inline_query
 
 app = FastAPI(title="yube Telegram bot")
 bot = Bot(token=settings.telegram_token)
@@ -28,6 +28,8 @@ async def telegram_webhook(request: Request) -> JSONResponse:
         await handle_channel(update)
     elif update.callback_query:
         await handle_callback_query(update)
+    elif update.inline_query:
+        await handle_inline_query(update)
     
     return JSONResponse({"ok": True})
 

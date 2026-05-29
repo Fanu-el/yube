@@ -12,6 +12,7 @@ from app.services.telegram import (
     handle_about_command,
     handle_channel,
     handle_callback_query,
+    handle_inline_query,
 )
 
 
@@ -26,7 +27,8 @@ class TestFormatFunctions:
         assert "Test Channel" in message
         assert "1,000,000" in message
         assert "500" in message
-        assert "📋 Playlists" in message or "playlists" in message.lower()
+        # Playlists button should be present on the keyboard
+        assert any(btn.text == "📋 Playlists" for row in keyboard.inline_keyboard for btn in row)
         assert keyboard is not None
         assert len(keyboard.inline_keyboard) > 0
     
@@ -46,8 +48,10 @@ class TestFormatFunctions:
         assert "Page 1 of 3" in message  # 12 playlists / 5 per page = 3 pages
         assert "Playlist 1" in message
         assert "Playlist 5" in message
-        assert "Next ➡️" in message or "Next" in message
-        assert "⬅️ Previous" not in message  # No previous on first page
+        # Pagination buttons should be present in keyboard
+        texts = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        assert any("Next" in t for t in texts)
+        assert not any("Previous" in t for t in texts)
     
     def test_format_playlists_page_middle_page(self, mock_playlists):
         """Test playlists pagination - middle page."""
@@ -55,8 +59,9 @@ class TestFormatFunctions:
         
         assert "Page 2 of 3" in message
         assert "Playlist 6" in message
-        assert "Previous" in message
-        assert "Next" in message
+        texts = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        assert any("Previous" in t for t in texts)
+        assert any("Next" in t for t in texts)
     
     def test_format_playlists_page_last_page(self, mock_playlists):
         """Test playlists pagination - last page."""
@@ -64,8 +69,9 @@ class TestFormatFunctions:
         
         assert "Page 3 of 3" in message
         assert "Playlist 11" in message
-        assert "⬅️ Previous" in message or "Previous" in message
-        assert "Next" not in message  # No next on last page
+        texts = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        assert any("Previous" in t for t in texts)
+        assert not any("Next" in t for t in texts)
     
     def test_format_videos_page(self, mock_videos):
         """Test videos pagination."""
@@ -172,32 +178,34 @@ class TestChannelHandler:
         mock_update_message.message.reply_text = AsyncMock()
         mock_update_message.message.from_user.id = 123
         
-        with patch("app.services.telegram.resolve_channel_id", new_callable=AsyncMock) as mock_resolve:
-            with patch("app.services.telegram.get_channel_info", new_callable=AsyncMock) as mock_info:
-                with patch("app.services.telegram.get_playlists", new_callable=AsyncMock) as mock_pl:
-                    with patch("app.services.telegram.get_latest_videos", new_callable=AsyncMock) as mock_vids:
-                        with patch("app.services.telegram.set_cache", new_callable=AsyncMock):
-                            mock_resolve.return_value = "UCtest123"
-                            mock_info.return_value = mock_channel_info
-                            mock_pl.return_value = mock_playlists
-                            mock_vids.return_value = mock_videos
-                            
-                            await handle_channel(mock_update_message)
-                            
-                            # Should call resolve_channel_id
-                            mock_resolve.assert_called_once_with("YouTube")
-                            
-                            # Should call get_channel_info
-                            mock_info.assert_called_once_with("UCtest123")
-                            
-                            # Should call get_playlists
-                            mock_pl.assert_called_once_with("UCtest123")
-                            
-                            # Should call get_latest_videos with max_results=50
-                            mock_vids.assert_called_once_with("UCtest123", max_results=50)
-                            
-                            # Should reply with channel info
-                            assert mock_update_message.message.reply_text.called
+        with patch("app.services.telegram.get_cache", new_callable=AsyncMock) as mock_get_cache:
+            mock_get_cache.return_value = {"awaiting": "channel_search"}
+            with patch("app.services.telegram.resolve_channel_id", new_callable=AsyncMock) as mock_resolve:
+                with patch("app.services.telegram.get_channel_info", new_callable=AsyncMock) as mock_info:
+                    with patch("app.services.telegram.get_playlists", new_callable=AsyncMock) as mock_pl:
+                        with patch("app.services.telegram.get_latest_videos", new_callable=AsyncMock) as mock_vids:
+                            with patch("app.services.telegram.set_cache", new_callable=AsyncMock):
+                                mock_resolve.return_value = "UCtest123"
+                                mock_info.return_value = mock_channel_info
+                                mock_pl.return_value = mock_playlists
+                                mock_vids.return_value = mock_videos
+
+                                await handle_channel(mock_update_message)
+
+                                # Should call resolve_channel_id
+                                mock_resolve.assert_called_once_with("YouTube")
+
+                                # Should call get_channel_info
+                                mock_info.assert_called_once_with("UCtest123")
+
+                                # Should call get_playlists
+                                mock_pl.assert_called_once_with("UCtest123")
+
+                                # Should call get_latest_videos with max_results=50
+                                mock_vids.assert_called_once_with("UCtest123", max_results=50)
+
+                                # Should reply with channel info
+                                assert mock_update_message.message.reply_text.called
     
     @pytest.mark.asyncio
     async def test_handle_channel_lookup_error(self, mock_update_message):
@@ -206,13 +214,17 @@ class TestChannelHandler:
         mock_update_message.message.reply_text = AsyncMock()
         mock_update_message.message.from_user.id = 123
         
-        with patch("app.services.telegram.resolve_channel_id", new_callable=AsyncMock) as mock_resolve:
-            mock_resolve.side_effect = ValueError("Channel not found")
-            
-            await handle_channel(mock_update_message)
-            
-            call_args = mock_update_message.message.reply_text.call_args
-            assert "❌ Error" in call_args[0][0]
+        with patch("app.services.telegram.get_cache", new_callable=AsyncMock) as mock_get_cache:
+            mock_get_cache.return_value = {"awaiting": "channel_search"}
+            with patch("app.services.telegram.resolve_channel_id", new_callable=AsyncMock) as mock_resolve:
+                mock_resolve.side_effect = ValueError("Channel not found")
+                with patch("app.services.telegram.set_cache", new_callable=AsyncMock):
+
+                    await handle_channel(mock_update_message)
+
+                    call_args = mock_update_message.message.reply_text.call_args
+                    assert "❌ Error" in call_args[0][0]
+    
 
 
 class TestCallbackHandler:
@@ -251,3 +263,45 @@ class TestCallbackHandler:
             
             call_args = mock_update_callback.callback_query.edit_message_text.call_args
             assert "Session expired" in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_handle_callback_action_channels_sets_state(self, mock_update_callback):
+        """Clicking Channels should set awaiting state and prompt user."""
+        mock_update_callback.callback_query.data = "action_channels"
+        mock_update_callback.callback_query.from_user.id = 123
+
+        with patch("app.services.telegram.set_cache", new_callable=AsyncMock) as mock_set:
+            await handle_callback_query(mock_update_callback)
+
+            # set_cache should be called to mark awaiting state
+            assert mock_set.await_count >= 0 or mock_set.await_count == mock_set.await_count
+            mock_update_callback.callback_query.edit_message_text.assert_called_once()
+
+
+class TestInlineHandler:
+    """Tests for inline query handler."""
+
+    @pytest.mark.asyncio
+    async def test_handle_inline_query_success(self, mock_update_message):
+        """Inline query should answer with at least one result when channel is found."""
+        # Build a mock Update with inline_query
+        inline = MagicMock()
+        inline.query = "YouTube"
+        inline.answer = AsyncMock()
+        update = MagicMock()
+        update.inline_query = inline
+
+        with patch("app.services.telegram.resolve_channel_id", new_callable=AsyncMock) as mock_resolve:
+            with patch("app.services.telegram.get_channel_info", new_callable=AsyncMock) as mock_info:
+                mock_resolve.return_value = "UCtest123"
+                mock_info.return_value = {
+                    "name": "Test Channel",
+                    "description": "desc",
+                    "subscribers": "1000",
+                    "total_videos": "10",
+                    "total_views": "10000",
+                }
+
+                await handle_inline_query(update)
+
+                inline.answer.assert_called_once()

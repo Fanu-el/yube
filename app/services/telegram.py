@@ -1,8 +1,15 @@
 import json
 import logging
-from typing import List
+from typing import List, Optional
+from uuid import uuid4
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import (
+    Update,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
+)
 from telegram.constants import ParseMode
 
 from app.services.cache import get_cache, set_cache
@@ -11,6 +18,8 @@ from app.services.youtube import get_channel_info, get_latest_videos, get_playli
 
 logger = logging.getLogger(__name__)
 ITEMS_PER_PAGE = 5
+SESSION_STATE_PREFIX = "telegram:state:"
+SESSION_CHANNEL_PREFIX = "telegram:channel:"
 
 
 def format_channel_info(info: dict, playlists_count: int, videos_count: int) -> tuple[str, InlineKeyboardMarkup]:
@@ -173,38 +182,71 @@ async def handle_callback_query(update: Update) -> None:
     await query.answer()
     
     data = query.data
-    
     try:
-        # Get stored channel data
-        user_channel_key = f"telegram:channel:{query.from_user.id}"
+        # Simple actions that don't require a stored channel session
+        if data == "action_channels":
+            state_key = f"{SESSION_STATE_PREFIX}{query.from_user.id}"
+            await set_cache(state_key, {"awaiting": "channel_search"}, ttl=300)
+            await query.edit_message_text(
+                "Please send the channel name, URL, or channel ID now.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")]]),
+            )
+            return
+
+        if data == "action_cancel":
+            state_key = f"{SESSION_STATE_PREFIX}{query.from_user.id}"
+            await set_cache(state_key, None, ttl=1)
+            await query.edit_message_text("Cancelled. Send a channel name or use /help to see options.")
+            return
+
+        # Otherwise we expect a stored channel session for pagination
+        user_channel_key = f"{SESSION_CHANNEL_PREFIX}{query.from_user.id}"
         channel_data = await get_cache(user_channel_key)
-        
+
         if not channel_data:
             await query.edit_message_text("❌ Session expired. Please search for a channel again.")
             return
-        
+
         channel_id = channel_data["channel_id"]
         info = channel_data["info"]
         playlists = channel_data["playlists"]
         videos = channel_data["videos"]
-        
+
         if data == "channel_info":
             message, keyboard = format_channel_info(info, len(playlists), len(videos))
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-        
         elif data.startswith("playlists_"):
             page = int(data.split("_")[1])
             message, keyboard = format_playlists_page(playlists, page)
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-        
         elif data.startswith("videos_"):
             page = int(data.split("_")[1])
             message, keyboard = format_videos_page(videos, page)
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
-    
     except Exception as exc:
         logger.exception("Error handling callback query")
         await query.edit_message_text(f"❌ Error: {html_escape(str(exc))}")
+
+
+async def handle_inline_query(update: Update) -> None:
+    """Handle inline mode queries (type @yourbot query in any chat)."""
+    inline = update.inline_query
+    query_text = (inline.query or "").strip()
+    if not query_text:
+        await inline.answer([], cache_time=5)
+        return
+
+    try:
+        # Resolve channel id and fetch details
+        channel_id = await resolve_channel_id(query_text)
+        info = await get_channel_info(channel_id)
+        # Build a single article result with the channel info
+        message, _ = format_channel_info(info, 0, 0)
+        content = InputTextMessageContent(message, parse_mode=ParseMode.HTML)
+        result = InlineQueryResultArticle(id=str(uuid4()), title=info.get("name", "Channel"), input_message_content=content, description=f"Subscribers: {int(info.get('subscribers',0)):,}")
+        await inline.answer([result], cache_time=60)
+    except Exception:
+        await inline.answer([], cache_time=5)
 
 
 async def handle_channel(update: Update) -> None:
@@ -228,33 +270,48 @@ async def handle_channel(update: Update) -> None:
             )
         return
 
-    # Handle channel lookup
-    await update.message.reply_text("🔍 Looking up channel...")
+    # Check if user is in an awaiting state (e.g., clicked Channels and should send query)
+    state_key = f"{SESSION_STATE_PREFIX}{update.message.from_user.id}"
+    state = await get_cache(state_key)
 
-    try:
-        channel_id = await resolve_channel_id(user_input)
-        info = await get_channel_info(channel_id)
-        playlists = await get_playlists(channel_id)
-        videos = await get_latest_videos(channel_id, max_results=50)
-        
-        # Store channel data for pagination
-        user_channel_key = f"telegram:channel:{update.message.from_user.id}"
-        channel_data = {
-            "channel_id": channel_id,
-            "info": info,
-            "playlists": playlists,
-            "videos": videos,
-        }
-        await set_cache(user_channel_key, channel_data, ttl=3600)
-        
-        # Send channel info with buttons
-        message, keyboard = format_channel_info(info, len(playlists), len(videos))
-        await update.message.reply_text(
-            message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=keyboard,
-            disable_web_page_preview=True,
-        )
-    except Exception as exc:
-        logger.exception("Error handling channel lookup")
-        await update.message.reply_text(f"❌ Error: {html_escape(str(exc))}")
+    if state and state.get("awaiting") == "channel_search":
+        # Clear state
+        await set_cache(state_key, None, ttl=1)
+
+        await update.message.reply_text("🔍 Looking up channel...")
+
+        try:
+            channel_id = await resolve_channel_id(user_input)
+            info = await get_channel_info(channel_id)
+            playlists = await get_playlists(channel_id)
+            videos = await get_latest_videos(channel_id, max_results=50)
+
+            # Store channel data for pagination
+            user_channel_key = f"{SESSION_CHANNEL_PREFIX}{update.message.from_user.id}"
+            channel_data = {
+                "channel_id": channel_id,
+                "info": info,
+                "playlists": playlists,
+                "videos": videos,
+            }
+            await set_cache(user_channel_key, channel_data, ttl=3600)
+
+            # Send channel info with buttons
+            message, keyboard = format_channel_info(info, len(playlists), len(videos))
+            await update.message.reply_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
+        except Exception as exc:
+            logger.exception("Error handling channel lookup")
+            await update.message.reply_text(f"❌ Error: {html_escape(str(exc))}")
+        return
+
+    # Otherwise show a simple action menu
+    menu = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔎 Channels", callback_data="action_channels")],
+        [InlineKeyboardButton("/help", callback_data="action_help")],
+    ])
+    await update.message.reply_text("Choose an action:", reply_markup=menu)

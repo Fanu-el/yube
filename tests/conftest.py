@@ -21,32 +21,43 @@ from telegram.constants import ParseMode
 @pytest.fixture
 def mock_update_message():
     """Create a mock Update with message."""
-    user = User(id=123456, is_bot=False, first_name="Test")
-    chat = Chat(id=123456, type="private")
-    message = Message(
-        message_id=1,
-        date=None,
-        chat=chat,
-        from_user=user,
-        text="test message",
-    )
-    update = Update(update_id=1, message=message)
+    from unittest.mock import MagicMock, AsyncMock
+
+    user = MagicMock()
+    user.id = 123456
+    user.is_bot = False
+    user.first_name = "Test"
+
+    message = MagicMock()
+    message.message_id = 1
+    message.date = None
+    message.chat = MagicMock()
+    message.from_user = user
+    message.text = "test message"
+    message.reply_text = AsyncMock()
+
+    update = MagicMock()
+    update.update_id = 1
+    update.message = message
     return update
 
 
 @pytest.fixture
 def mock_update_callback():
     """Create a mock Update with callback_query."""
-    user = User(id=123456, is_bot=False, first_name="Test")
     from telegram import CallbackQuery
-    
+    from unittest.mock import MagicMock, AsyncMock
+
     callback_query = MagicMock(spec=CallbackQuery)
-    callback_query.from_user = user
+    callback_query.from_user = MagicMock()
+    callback_query.from_user.id = 123456
     callback_query.data = "playlists_0"
     callback_query.answer = AsyncMock()
     callback_query.edit_message_text = AsyncMock()
-    
-    update = Update(update_id=2, callback_query=callback_query)
+
+    update = MagicMock()
+    update.update_id = 2
+    update.callback_query = callback_query
     return update
 
 
