@@ -1,1 +1,1 @@
-yube - a youtube channel helper telegram bot built with fastapi
+yube - a youtube helper telegram bot built with fastapi
