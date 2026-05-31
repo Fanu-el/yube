@@ -5,6 +5,7 @@ from telegram.constants import ParseMode
 
 from app.services.channels.handlers import (
     format_channel_info,
+    format_main_menu,
     format_playlist_items_page,
     format_video_detail,
     format_playlists_page,
@@ -16,6 +17,7 @@ from app.services.channels.handlers import (
 
 __all__ = [
     "format_channel_info",
+    "format_main_menu",
     "format_playlist_items_page",
     "format_video_detail",
     "format_playlists_page",

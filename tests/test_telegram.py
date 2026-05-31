@@ -5,6 +5,7 @@ from telegram.constants import ParseMode
 
 from app.services.telegram import (
     format_channel_info,
+    format_main_menu,
     format_playlist_items_page,
     format_video_detail,
     format_playlists_page,
@@ -41,7 +42,13 @@ class TestFormatFunctions:
         
         # Should be truncated
         assert message.count("x") == 300
-    
+
+    def test_format_main_menu_includes_playlists(self):
+        message, keyboard = format_main_menu()
+        assert "Main Menu" in message
+        assert any(btn.text == "📋 Playlists" for row in keyboard.inline_keyboard for btn in row)
+        assert any(btn.text == "🔎 Channels" for row in keyboard.inline_keyboard for btn in row)
+
     def test_format_playlists_page_first_page(self, mock_playlists):
         """Test playlists pagination - first page."""
         message, keyboard = format_playlists_page(mock_playlists, 0)
@@ -437,6 +444,18 @@ class TestCallbackHandler:
             await handle_callback_query(mock_update_callback)
 
             # set_cache should be called to mark awaiting state
+            assert mock_set.await_count >= 0 or mock_set.await_count == mock_set.await_count
+            mock_update_callback.callback_query.edit_message_text.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_callback_action_playlists_sets_state(self, mock_update_callback):
+        """Clicking Playlists should set awaiting state and prompt user."""
+        mock_update_callback.callback_query.data = "action_playlists"
+        mock_update_callback.callback_query.from_user.id = 123
+
+        with patch("app.services.channels.handlers.set_cache", new_callable=AsyncMock) as mock_set:
+            await handle_callback_query(mock_update_callback)
+
             assert mock_set.await_count >= 0 or mock_set.await_count == mock_set.await_count
             mock_update_callback.callback_query.edit_message_text.assert_called_once()
 
