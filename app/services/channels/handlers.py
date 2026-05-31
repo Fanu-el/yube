@@ -62,13 +62,17 @@ def _parse_playlist_id(user_input: str) -> str | None:
 def format_main_menu() -> tuple[str, InlineKeyboardMarkup]:
     message = (
         "<b>🏠 Main Menu</b>\n\n"
-        "Send a channel name, URL, or channel ID to search.\n"
-        "Example: <code>YouTube</code> or <code>https://youtube.com/channel/UC...</code>\n\n"
+        "Choose a feature to get started.\n"
+        "Use the buttons below to search channels or playlists directly.\n\n"
         "You can also paste a playlist URL or playlist ID directly.\n"
-        "Use the buttons below for quick navigation."
+        "Example: <code>https://youtube.com/playlist?list=PL...</code>\n"
+        "or <code>PL...</code>"
     )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔎 Channels", callback_data="action_channels")],
+        [
+            InlineKeyboardButton("🔎 Channels", callback_data="action_channels"),
+            InlineKeyboardButton("📋 Playlists", callback_data="action_playlists"),
+        ],
         [InlineKeyboardButton("❓ Help", callback_data="action_help")],
         [InlineKeyboardButton("ℹ️ About", callback_data="action_about")],
     ])
@@ -375,6 +379,15 @@ async def handle_callback_query(update: Update) -> None:
             )
             return
 
+        if data == "action_playlists":
+            state_key = f"{SESSION_STATE_PREFIX}{query.from_user.id}"
+            await set_cache(state_key, {"awaiting": "playlist_search"}, ttl=300)
+            await query.edit_message_text(
+                "Please send the playlist URL or playlist ID now.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")]]),
+            )
+            return
+
         if data == "action_help":
             message, keyboard = format_help_message()
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
@@ -593,6 +606,16 @@ async def handle_channel(update: Update) -> None:
         except Exception:
             playlist_id = candidate
 
+    # Check if user is in an awaiting state (e.g., clicked Channels or Playlists and should send query)
+    state_key = f"{SESSION_STATE_PREFIX}{update.message.from_user.id}"
+    state = await get_cache(state_key)
+
+    if state and state.get("awaiting") == "playlist_search":
+        await set_cache(state_key, None, ttl=1)
+        if not playlist_id:
+            await update.message.reply_text("❌ Please send a valid playlist URL or playlist ID.")
+            return
+
     if playlist_id:
         await update.message.reply_text("🔍 Looking up playlist...")
         try:
@@ -618,10 +641,6 @@ async def handle_channel(update: Update) -> None:
             logger.exception("Error handling playlist lookup")
             await update.message.reply_text(f"❌ Error: {html_escape(str(exc))}")
         return
-
-    # Check if user is in an awaiting state (e.g., clicked Channels and should send query)
-    state_key = f"{SESSION_STATE_PREFIX}{update.message.from_user.id}"
-    state = await get_cache(state_key)
 
     if state and state.get("awaiting") == "channel_search":
         # Clear state
