@@ -241,7 +241,48 @@ class TestChannelHandler:
 
                                 # Should reply with channel info
                                 assert mock_update_message.message.reply_text.called
-    
+
+    @pytest.mark.asyncio
+    async def test_handle_direct_playlist_lookup(self, mock_update_message):
+        """Test direct playlist URL/ID lookup flow."""
+        mock_update_message.message.text = "https://youtube.com/playlist?list=PLtest123"
+        mock_update_message.message.reply_text = AsyncMock()
+        mock_update_message.message.from_user.id = 123
+
+        with patch("app.services.channels.handlers.get_cache", new_callable=AsyncMock) as mock_get_cache:
+            mock_get_cache.return_value = {"awaiting": "channel_search"}
+            with patch("app.services.channels.handlers.resolve_playlist_id", new_callable=AsyncMock) as mock_resolve:
+                with patch("app.services.channels.handlers.get_playlist_info", new_callable=AsyncMock) as mock_info:
+                    with patch("app.services.channels.handlers.get_playlist_items", new_callable=AsyncMock) as mock_items:
+                        with patch("app.services.channels.handlers.set_cache", new_callable=AsyncMock):
+                            mock_resolve.return_value = "PLtest123"
+                            mock_info.return_value = {
+                                "playlist_id": "PLtest123",
+                                "title": "Test Playlist",
+                                "description": "A playlist description.",
+                                "item_count": 8,
+                                "url": "https://youtube.com/playlist?list=PLtest123",
+                                "channel_title": "Test Channel",
+                                "channel_id": "UCtestchannel",
+                                "thumbnail": "https://example.com/default.jpg",
+                            }
+                            mock_items.return_value = [
+                                {
+                                    "title": "Video 1",
+                                    "url": "https://youtube.com/watch?v=vid1",
+                                    "video_id": "vid1",
+                                    "published": "2024-01-01T00:00:00Z",
+                                    "thumbnail": "https://img.youtube.com/vi/vid1/default.jpg",
+                                }
+                            ]
+
+                            await handle_channel(mock_update_message)
+
+                            mock_resolve.assert_called_once_with("https://youtube.com/playlist?list=PLtest123")
+                            mock_info.assert_called_once_with("PLtest123")
+                            mock_items.assert_called_once_with("PLtest123")
+                            assert mock_update_message.message.reply_text.call_count >= 2
+
     @pytest.mark.asyncio
     async def test_handle_channel_lookup_error(self, mock_update_message):
         """Test channel lookup error handling."""

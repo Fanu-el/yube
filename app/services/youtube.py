@@ -98,58 +98,6 @@ async def get_channel_info(channel_id: str) -> Dict[str, Any]:
     return result
 
 
-async def get_playlists(channel_id: str) -> List[Dict[str, Any]]:
-    cache_key = f"youtube:channel:playlists:{channel_id}"
-    cached = await get_cache(cache_key)
-    if cached:
-        return cached
-
-    request = youtube.playlists().list(
-        part="snippet,contentDetails",
-        channelId=channel_id,
-        maxResults=25,
-    )
-    response = await _execute_youtube(request)
-    playlists = [
-        {
-            "title": item["snippet"]["title"],
-            "playlist_id": item["id"],
-            "video_count": item["contentDetails"].get("itemCount", 0),
-            "url": f"https://youtube.com/playlist?list={item['id']}",
-        }
-        for item in response.get("items", [])
-    ]
-    await set_cache(cache_key, playlists, ttl=1800)
-    return playlists
-
-
-async def get_playlist_items(playlist_id: str, max_results: int = 50) -> List[Dict[str, Any]]:
-    cache_key = f"youtube:playlist:items:{playlist_id}"
-    cached = await get_cache(cache_key)
-    if cached:
-        return cached
-
-    request = youtube.playlistItems().list(
-        part="snippet",
-        playlistId=playlist_id,
-        maxResults=max_results,
-    )
-    response = await _execute_youtube(request)
-    items = [
-        {
-            "title": item["snippet"]["title"],
-            "url": f"https://youtube.com/watch?v={item['snippet']['resourceId']['videoId']}",
-            "video_id": item["snippet"]["resourceId"]["videoId"],
-            "published": item["snippet"].get("publishedAt"),
-            "thumbnail": _get_thumbnail_url(item["snippet"].get("thumbnails", {})),
-        }
-        for item in response.get("items", [])
-        if item.get("snippet", {}).get("resourceId", {}).get("videoId")
-    ]
-    await set_cache(cache_key, items, ttl=300)
-    return items
-
-
 async def get_latest_videos(channel_id: str, max_results: int = 10) -> List[Dict[str, Any]]:
     cache_key = f"youtube:channel:latest:{channel_id}:{max_results}"
     cached = await get_cache(cache_key)

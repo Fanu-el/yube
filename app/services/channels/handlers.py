@@ -1,6 +1,8 @@
 import logging
 from typing import List
 from uuid import uuid4
+import re
+from urllib.parse import urlparse, parse_qs
 
 from telegram import (
     Update,
@@ -16,16 +18,45 @@ from app.utils import html_escape
 from app.services.youtube import (
     get_channel_info,
     get_latest_videos,
-    get_playlist_items,
     get_video_stats,
-    get_playlists,
     resolve_channel_id,
+)
+from app.services.playlists import (
+    get_playlist_info,
+    get_playlist_items,
+    get_playlists,
+    resolve_playlist_id,
 )
 
 logger = logging.getLogger(__name__)
 ITEMS_PER_PAGE = 5
 SESSION_STATE_PREFIX = "telegram:state:"
 SESSION_CHANNEL_PREFIX = "telegram:channel:"
+SESSION_PLAYLIST_PREFIX = "telegram:playlist:"
+
+
+def _parse_playlist_id(user_input: str) -> str | None:
+    """Lightweight playlist id/url detection used to avoid touching cache.
+
+    Mirrors the parsing logic in the playlist service but does not access
+    Redis or other I/O so tests can run without patching the playlist cache.
+    """
+    normalized = (user_input or "").strip()
+    if not normalized:
+        return None
+
+    try:
+        parsed = urlparse(normalized if "://" in normalized else f"https://{normalized}")
+        playlist_id = parse_qs(parsed.query).get("list", [None])[0]
+        if playlist_id:
+            return playlist_id
+    except Exception:
+        pass
+
+    if re.fullmatch(r"[A-Za-z0-9_-]{10,}", normalized) and not normalized.startswith("UC"):
+        return normalized
+
+    return None
 
 
 def format_main_menu() -> tuple[str, InlineKeyboardMarkup]:
@@ -33,6 +64,7 @@ def format_main_menu() -> tuple[str, InlineKeyboardMarkup]:
         "<b>🏠 Main Menu</b>\n\n"
         "Send a channel name, URL, or channel ID to search.\n"
         "Example: <code>YouTube</code> or <code>https://youtube.com/channel/UC...</code>\n\n"
+        "You can also paste a playlist URL or playlist ID directly.\n"
         "Use the buttons below for quick navigation."
     )
     keyboard = InlineKeyboardMarkup([
@@ -46,7 +78,7 @@ def format_main_menu() -> tuple[str, InlineKeyboardMarkup]:
 def format_help_message() -> tuple[str, InlineKeyboardMarkup]:
     message = (
         "<b>📖 Help</b>\n\n"
-        "Send a channel name, URL, or channel ID to see channel stats, description, playlists, and latest uploads.\n\n"
+        "Send a channel name, URL, channel ID, or playlist URL/ID to see channel stats, description, playlists, latest uploads, or playlist details.\n\n"
         "<b>Commands:</b>\n"
         "/start - Show welcome message\n"
         "/help - Show this help screen\n"
@@ -69,6 +101,7 @@ def format_about_message() -> tuple[str, InlineKeyboardMarkup]:
         "• Fast channel lookup by name, URL, or ID\n"
         "• Channel statistics and description\n"
         "• Playlist browsing with pagination\n"
+        "• Direct playlist lookup from URL or ID\n"
         "• Latest uploads and video details\n"
     )
     keyboard = InlineKeyboardMarkup([
@@ -139,6 +172,24 @@ def format_channel_info(info: dict, playlists_count: int, videos_count: int) -> 
     return message, keyboard
 
 
+def format_playlist_info(info: dict) -> tuple[str, InlineKeyboardMarkup]:
+    description = info.get("description", "")
+    description_text = html_escape(description) if description else "No description available."
+    message = (
+        f"<b>📋 Playlist: {html_escape(info['title'])}</b>\n\n"
+        f"<b>🎬 Videos:</b> <b>{int(info.get('item_count', 0)):,}</b>\n"
+    )
+    if info.get("channel_title"):
+        message += f"\n👤 Channel: <b>{html_escape(info['channel_title'])}</b>"
+    message += f"\n\n{description_text}"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("▶ View Videos", callback_data=f"playlist_items_direct_{info['playlist_id']}_0")],
+        [InlineKeyboardButton("🏠 Home", callback_data="action_home")],
+    ])
+    return message, keyboard
+
+
 def format_playlists_page(playlists: List[dict], page: int) -> tuple[str, InlineKeyboardMarkup]:
     """Format playlists page with pagination."""
     total_pages = (len(playlists) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
@@ -180,7 +231,14 @@ def format_playlists_page(playlists: List[dict], page: int) -> tuple[str, Inline
     return message, keyboard
 
 
-def format_playlist_items_page(items: List[dict], page: int, playlist_id: str, playlist_title: str) -> tuple[str, InlineKeyboardMarkup]:
+def format_playlist_items_page(
+    items: List[dict],
+    page: int,
+    playlist_id: str,
+    playlist_title: str,
+    back_callback: str = "playlists_0",
+    direct: bool = False,
+) -> tuple[str, InlineKeyboardMarkup]:
     total_pages = (len(items) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
     start_idx = page * ITEMS_PER_PAGE
     end_idx = min(start_idx + ITEMS_PER_PAGE, len(items))
@@ -201,7 +259,11 @@ def format_playlist_items_page(items: List[dict], page: int, playlist_id: str, p
         [
             InlineKeyboardButton(
                 f"▶ {html_escape(item['title'])[:30]}",
-                callback_data=f"video_{item['video_id']}_playlist_{playlist_id}_{page}",
+                callback_data=(
+                    f"video_{item['video_id']}_playlist_direct_{playlist_id}_{page}"
+                    if direct
+                    else f"video_{item['video_id']}_playlist_{playlist_id}_{page}"
+                ),
             )
         ]
         for item in page_items
@@ -213,7 +275,8 @@ def format_playlist_items_page(items: List[dict], page: int, playlist_id: str, p
     if page < total_pages - 1:
         nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"playlist_items_{playlist_id}_{page + 1}"))
 
-    nav_buttons.append(InlineKeyboardButton("🔙 Playlists", callback_data="playlists_0"))
+    back_text = "🔙 Playlists" if back_callback == "playlists_0" else "🔙 Playlist"
+    nav_buttons.append(InlineKeyboardButton(back_text, callback_data=back_callback))
     nav_buttons.append(InlineKeyboardButton("🔙 Channel", callback_data="channel_info"))
     nav_buttons.append(InlineKeyboardButton("🏠 Home", callback_data="action_home"))
     keyboard_rows.append(nav_buttons)
@@ -242,7 +305,7 @@ def format_video_detail(video: dict, stats: dict, page: int, return_callback: st
         return_callback = f"videos_{page}"
 
     back_text = "🔙 Videos"
-    if return_callback.startswith("playlist_items_"):
+    if return_callback and return_callback.startswith("playlist_items"):
         back_text = "🔙 Playlist"
 
     keyboard = InlineKeyboardMarkup([
@@ -333,20 +396,67 @@ async def handle_callback_query(update: Update) -> None:
             await query.edit_message_text("Cancelled. Send a channel name or use /help to see options.")
             return
 
-        # Otherwise we expect a stored channel session for pagination
+        # Otherwise we expect a stored channel or playlist session for pagination
         user_channel_key = f"{SESSION_CHANNEL_PREFIX}{query.from_user.id}"
+        user_playlist_key = f"{SESSION_PLAYLIST_PREFIX}{query.from_user.id}"
         channel_data = await get_cache(user_channel_key)
+        playlist_data = await get_cache(user_playlist_key)
 
-        if not channel_data:
-            await query.edit_message_text("❌ Session expired. Please search for a channel again.")
+        if not channel_data and not playlist_data:
+            await query.edit_message_text("❌ Session expired. Please search for a channel or playlist again.")
             return
 
-        info = channel_data["info"]
-        playlists = channel_data["playlists"]
-        videos = channel_data["videos"]
+        info = channel_data["info"] if channel_data else None
+        playlists = channel_data["playlists"] if channel_data else []
+        videos = channel_data["videos"] if channel_data else []
+
+        if playlist_data and data.startswith("playlist_items_direct_"):
+            payload = data[len("playlist_items_direct_"):]
+            playlist_id, page_text = payload.rsplit("_", 1)
+            page = int(page_text)
+            playlist_title = playlist_data["info"]["title"]
+            playlist_items = playlist_data.get("items")
+            if playlist_items is None:
+                playlist_items = await get_playlist_items(playlist_id)
+                playlist_data["items"] = playlist_items
+                await set_cache(user_playlist_key, playlist_data, ttl=3600)
+            message, keyboard = format_playlist_items_page(
+                playlist_items,
+                page,
+                playlist_id,
+                playlist_title,
+                back_callback="playlist_info_direct",
+                direct=True,
+            )
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            return
+        elif playlist_data and data.startswith("video_") and "_playlist_direct_" in data:
+            payload = data[len("video_"):]
+            video_id, rest = payload.split("_playlist_direct_", 1)
+            playlist_id, page_text = rest.rsplit("_", 1)
+            page = int(page_text)
+            return_callback = f"playlist_items_direct_{playlist_id}_{page}"
+            video = next(
+                (
+                    item
+                    for item in playlist_data.get("items", [])
+                    if item.get("video_id") == video_id
+                ),
+                None,
+            )
+            if not video:
+                await query.edit_message_text("❌ Video not found or session expired.")
+                return
+            stats = await get_video_stats(video_id)
+            message, keyboard = format_video_detail(video, stats, page, return_callback=return_callback)
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            return
 
         if data == "channel_info":
             message, keyboard = format_channel_info(info, len(playlists), len(videos))
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        elif data == "playlist_info_direct":
+            message, keyboard = format_playlist_info(playlist_data["info"])
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         elif data == "description_more":
             message, keyboard = format_full_description(info)
@@ -468,6 +578,45 @@ async def handle_channel(update: Update) -> None:
             await update.message.reply_text(
                 "❓ Unknown command. Send /help to see available commands."
             )
+        return
+
+    # Check for direct playlist URLs or IDs before other input handling
+    # First do a lightweight parse to avoid unnecessary I/O. If the input
+    # looks like a playlist, call `resolve_playlist_id` so tests that patch
+    # that function can observe the call. If resolution fails, fall back
+    # to the parsed value.
+    playlist_id = None
+    candidate = _parse_playlist_id(user_input)
+    if candidate:
+        try:
+            playlist_id = await resolve_playlist_id(user_input)
+        except Exception:
+            playlist_id = candidate
+
+    if playlist_id:
+        await update.message.reply_text("🔍 Looking up playlist...")
+        try:
+            playlist_info = await get_playlist_info(playlist_id)
+            playlist_items = await get_playlist_items(playlist_id)
+
+            user_playlist_key = f"{SESSION_PLAYLIST_PREFIX}{update.message.from_user.id}"
+            playlist_data = {
+                "playlist_id": playlist_id,
+                "info": playlist_info,
+                "items": playlist_items,
+            }
+            await set_cache(user_playlist_key, playlist_data, ttl=3600)
+
+            message, keyboard = format_playlist_info(playlist_info)
+            await update.message.reply_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
+        except Exception as exc:
+            logger.exception("Error handling playlist lookup")
+            await update.message.reply_text(f"❌ Error: {html_escape(str(exc))}")
         return
 
     # Check if user is in an awaiting state (e.g., clicked Channels and should send query)
