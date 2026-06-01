@@ -275,9 +275,27 @@ def format_playlist_items_page(
 
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"playlist_items_{playlist_id}_{page - 1}"))
+        nav_buttons.append(
+            InlineKeyboardButton(
+                "⬅️ Previous",
+                callback_data=(
+                    f"playlist_items_direct_{playlist_id}_{page - 1}"
+                    if direct
+                    else f"playlist_items_{playlist_id}_{page - 1}"
+                ),
+            )
+        )
     if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"playlist_items_{playlist_id}_{page + 1}"))
+        nav_buttons.append(
+            InlineKeyboardButton(
+                "Next ➡️",
+                callback_data=(
+                    f"playlist_items_direct_{playlist_id}_{page + 1}"
+                    if direct
+                    else f"playlist_items_{playlist_id}_{page + 1}"
+                ),
+            )
+        )
 
     back_text = "🔙 Playlists" if back_callback == "playlists_0" else "🔙 Playlist"
     nav_buttons.append(InlineKeyboardButton(back_text, callback_data=back_callback))
