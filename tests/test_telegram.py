@@ -554,3 +554,52 @@ class TestInlineHandler:
                 await handle_inline_query(update)
 
                 inline.answer.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_inline_query_video(self, mock_update_message):
+        """Inline query should return a video result when a video URL is provided."""
+        inline = MagicMock()
+        inline.query = "https://youtube.com/watch?v=dQw4w9WgXcQ"
+        inline.answer = AsyncMock()
+        update = MagicMock()
+        update.inline_query = inline
+
+        with patch("app.services.channels.handlers.parse_video_id", return_value="dQw4w9WgXcQ"):
+            with patch("app.services.channels.handlers.get_video_info", new_callable=AsyncMock) as mock_info:
+                mock_info.return_value = {
+                    "video_id": "dQw4w9WgXcQ",
+                    "title": "Test Video",
+                    "url": "https://youtube.com/watch?v=dQw4w9WgXcQ",
+                    "channel_title": "Test Channel",
+                    "duration": "3:33",
+                    "views": "1234567",
+                }
+
+                await handle_inline_query(update)
+
+                inline.answer.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_inline_query_playlist(self, mock_update_message):
+        """Inline query should return a playlist result when a playlist URL is provided."""
+        inline = MagicMock()
+        inline.query = "https://youtube.com/playlist?list=PLtest123"
+        inline.answer = AsyncMock()
+        update = MagicMock()
+        update.inline_query = inline
+
+        with patch("app.services.channels.handlers.parse_video_id", return_value=None):
+            with patch("app.services.channels.handlers.resolve_playlist_id", new_callable=AsyncMock) as mock_resolve:
+                with patch("app.services.channels.handlers.get_playlist_info", new_callable=AsyncMock) as mock_info:
+                    mock_resolve.return_value = "PLtest123"
+                    mock_info.return_value = {
+                        "playlist_id": "PLtest123",
+                        "title": "Test Playlist",
+                        "item_count": 8,
+                        "channel_title": "Test Channel",
+                        "url": "https://youtube.com/playlist?list=PLtest123",
+                    }
+
+                    await handle_inline_query(update)
+
+                    inline.answer.assert_called_once()
