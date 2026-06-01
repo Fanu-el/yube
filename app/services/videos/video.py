@@ -67,6 +67,8 @@ def format_video_detail(
         f"<b>💬 Comments:</b> <b>{int(stats.get('comments', '0')):,}</b>\n\n"
         f"<a href=\"{html_escape(video['url'])}\">Watch on YouTube</a>"
     )
+    if video.get("thumbnail"):
+        message += f"\n\n{html_escape(video['thumbnail'])}"
 
     if return_callback is None:
         return_callback = f"videos_{page}"
@@ -99,9 +101,13 @@ def format_videos_page(videos: List[dict], page: int) -> tuple[str, InlineKeyboa
         for i, video in enumerate(page_videos)
     ) or "No videos found."
 
+    preview_line = ""
+    if page_videos and page_videos[0].get("thumbnail"):
+        preview_line = f"\n\n{page_videos[0]['thumbnail']}"
+
     message = (
         f"<b>✨ Latest Videos</b>\n\n"
-        f"{video_lines}\n\n"
+        f"{video_lines}{preview_line}\n\n"
         f"<b>Page {page + 1} of {total_pages}</b> (showing {end_idx - start_idx} of {len(videos)})"
     )
 

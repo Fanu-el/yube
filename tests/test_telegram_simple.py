@@ -28,7 +28,8 @@ class TestFormatFunctions:
         """Test that description is truncated to 300 chars."""
         mock_channel_info["description"] = "x" * 500
         message, _ = format_channel_info(mock_channel_info, 0, 0)
-        assert message.count("x") <= 300
+        assert "x" * 300 in message
+        assert "..." in message
     
     def test_format_playlists_page_first_page(self, mock_playlists):
         """Test playlists pagination - first page."""

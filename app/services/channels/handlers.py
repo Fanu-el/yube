@@ -92,16 +92,21 @@ def format_main_menu() -> tuple[str, InlineKeyboardMarkup]:
 def format_help_message() -> tuple[str, InlineKeyboardMarkup]:
     message = (
         "<b>📖 Help</b>\n\n"
-        "Send a channel name, URL, channel ID, or playlist URL/ID to see channel stats, description, playlists, latest uploads, or playlist details.\n\n"
+        "Send a channel name, URL, channel ID, playlist URL/ID, or video URL/ID to get fast YouTube results.\n\n"
+        "<b>What you can do:</b>\n"
+        "• Search channels by name, URL, or ID\n"
+        "• Browse playlists with pagination\n"
+        "• Open video details, stats, and preview links\n\n"
         "<b>Commands:</b>\n"
-        "/start - Show welcome message\n"
+        "/start - Show the welcome message\n"
         "/help - Show this help screen\n"
         "/about - About this bot\n"
-        "/menu or / - Show the action menu\n\n"
+        "/menu or / - Open the main action menu\n\n"
         "You can also click the buttons below."
     )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔎 Channels", callback_data="action_channels")],
+        [InlineKeyboardButton("🔎 Channels", callback_data="action_channels"), InlineKeyboardButton("📋 Playlists", callback_data="action_playlists")],
+        [InlineKeyboardButton("▶ Videos", callback_data="action_videos")],
         [InlineKeyboardButton("🏠 Home", callback_data="action_home")],
     ])
     return message, keyboard
@@ -110,16 +115,16 @@ def format_help_message() -> tuple[str, InlineKeyboardMarkup]:
 def format_about_message() -> tuple[str, InlineKeyboardMarkup]:
     message = (
         "<b>ℹ️ About yube</b>\n\n"
-        "yube is a Telegram bot for discovering YouTube channel information quickly.\n\n"
+        "yube is a Telegram bot for discovering YouTube channel, playlist, and video information quickly.\n\n"
         "Features:\n"
         "• Fast channel lookup by name, URL, or ID\n"
-        "• Channel statistics and description\n"
-        "• Playlist browsing with pagination\n"
-        "• Direct playlist lookup from URL or ID\n"
-        "• Latest uploads and video details\n"
+        "• Playlist browsing and direct playlist lookup\n"
+        "• Video lookup by URL or ID with details and previews\n"
+        "• Interactive buttons for channels, playlists, and videos\n"
     )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔎 Channels", callback_data="action_channels")],
+        [InlineKeyboardButton("🔎 Channels", callback_data="action_channels"), InlineKeyboardButton("📋 Playlists", callback_data="action_playlists")],
+        [InlineKeyboardButton("▶ Videos", callback_data="action_videos")],
         [InlineKeyboardButton("🏠 Home", callback_data="action_home")],
     ])
     return message, keyboard
@@ -166,6 +171,9 @@ def format_channel_info(info: dict, playlists_count: int, videos_count: int) -> 
 
     message += f"\n\n<b>📝 Description:</b>\n{display_description}"
 
+    if info.get("thumbnail"):
+        message += f"\n\n{html_escape(info['thumbnail'])}"
+
     keyboard_rows = []
 
     # If the description was truncated, show the More button immediately
@@ -196,6 +204,8 @@ def format_playlist_info(info: dict) -> tuple[str, InlineKeyboardMarkup]:
     if info.get("channel_title"):
         message += f"\n👤 Channel: <b>{html_escape(info['channel_title'])}</b>"
     message += f"\n\n{description_text}"
+    if info.get("thumbnail"):
+        message += f"\n\n{html_escape(info['thumbnail'])}"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("▶ View Videos", callback_data=f"playlist_items_direct_{info['playlist_id']}_0")],
@@ -695,7 +705,6 @@ async def handle_channel(update: Update) -> None:
                 message,
                 parse_mode=ParseMode.HTML,
                 reply_markup=keyboard,
-                disable_web_page_preview=True,
             )
         except Exception as exc:
             logger.exception("Error handling video lookup")
@@ -722,7 +731,6 @@ async def handle_channel(update: Update) -> None:
                 message,
                 parse_mode=ParseMode.HTML,
                 reply_markup=keyboard,
-                disable_web_page_preview=True,
             )
         except Exception as exc:
             logger.exception("Error handling playlist lookup")
@@ -757,7 +765,6 @@ async def handle_channel(update: Update) -> None:
                 message,
                 parse_mode=ParseMode.HTML,
                 reply_markup=keyboard,
-                disable_web_page_preview=True,
             )
         except Exception as exc:
             logger.exception("Error handling channel lookup")

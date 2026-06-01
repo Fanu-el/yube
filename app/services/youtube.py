@@ -92,6 +92,7 @@ async def get_channel_info(channel_id: str) -> Dict[str, Any]:
         "total_views": channel["statistics"].get("viewCount", "0"),
         "published_at": channel["snippet"].get("publishedAt"),
         "country": channel["snippet"].get("country"),
+        "thumbnail": _get_thumbnail_url(channel["snippet"].get("thumbnails", {})),
         "uploads_playlist_id": channel["contentDetails"]["relatedPlaylists"].get("uploads"),
     }
     await set_cache(cache_key, result, ttl=900)

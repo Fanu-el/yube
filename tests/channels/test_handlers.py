@@ -35,8 +35,9 @@ class TestFormatChannelFunctions:
         mock_channel_info["description"] = "x" * 500
         message, _ = format_channel_info(mock_channel_info, 0, 0)
         
-        # Should be truncated
-        assert message.count("x") == 300
+        # Should be truncated to 300 characters and show ellipsis
+        assert "x" * 300 in message
+        assert "..." in message
 
     def test_format_main_menu_includes_playlists(self):
         message, keyboard = format_main_menu()

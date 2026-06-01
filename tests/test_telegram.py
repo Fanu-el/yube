@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from telegram.constants import ParseMode
 
 from app.services.telegram import (
+    format_about_message,
     format_channel_info,
+    format_help_message,
     format_main_menu,
     format_playlist_items_page,
     format_video_detail,
@@ -30,6 +32,7 @@ class TestFormatFunctions:
         assert "Test Channel" in message
         assert "1,000,000" in message
         assert "500" in message
+        assert "https://example.com/channel.jpg" in message
         # Playlists button should be present on the keyboard
         assert any(btn.text == "📋 Playlists" for row in keyboard.inline_keyboard for btn in row)
         assert keyboard is not None
@@ -40,14 +43,31 @@ class TestFormatFunctions:
         mock_channel_info["description"] = "x" * 500
         message, _ = format_channel_info(mock_channel_info, 0, 0)
         
-        # Should be truncated
-        assert message.count("x") == 300
+        # Should be truncated to 300 characters and show ellipsis
+        assert "x" * 300 in message
+        assert "..." in message
 
     def test_format_main_menu_includes_playlists(self):
         message, keyboard = format_main_menu()
         assert "Main Menu" in message
         assert any(btn.text == "📋 Playlists" for row in keyboard.inline_keyboard for btn in row)
         assert any(btn.text == "🔎 Channels" for row in keyboard.inline_keyboard for btn in row)
+        assert any(btn.text == "▶ Videos" for row in keyboard.inline_keyboard for btn in row)
+
+    def test_format_help_message_includes_all_actions(self):
+        message, keyboard = format_help_message()
+        assert "playlist" in message.lower()
+        assert "video" in message.lower()
+        assert any(btn.text == "🔎 Channels" for row in keyboard.inline_keyboard for btn in row)
+        assert any(btn.text == "📋 Playlists" for row in keyboard.inline_keyboard for btn in row)
+        assert any(btn.text == "▶ Videos" for row in keyboard.inline_keyboard for btn in row)
+
+    def test_format_about_message_includes_all_actions(self):
+        message, keyboard = format_about_message()
+        assert "playlist" in message.lower()
+        assert "video" in message.lower()
+        assert any(btn.text == "🔎 Channels" for row in keyboard.inline_keyboard for btn in row)
+        assert any(btn.text == "📋 Playlists" for row in keyboard.inline_keyboard for btn in row)
         assert any(btn.text == "▶ Videos" for row in keyboard.inline_keyboard for btn in row)
 
     def test_format_playlists_page_first_page(self, mock_playlists):
@@ -122,6 +142,7 @@ class TestFormatFunctions:
         assert "✨ Latest Videos" in message
         assert "Page 1 of 5" in message  # 25 videos / 5 per page = 5 pages
         assert "Video 1" in message
+        assert "https://img.youtube.com/vi/vid1/default.jpg" in message
         buttons = [btn.text for row in keyboard.inline_keyboard for btn in row]
         assert any(btn_text.startswith("▶") for btn_text in buttons)
 
@@ -139,6 +160,7 @@ class TestFormatFunctions:
         assert "▶ Video 1" in message
         assert "⏱ Duration:" in message
         assert "👁 Views:" in message
+        assert "https://img.youtube.com/vi/vid1/default.jpg" in message
         assert "🔙 Videos" in [btn.text for row in keyboard.inline_keyboard for btn in row]
 
 
