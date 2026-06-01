@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import List
 from uuid import uuid4
 import re
@@ -33,6 +34,11 @@ from app.services.videos import (
     format_video_detail,
     format_videos_page,
 )
+from app.utils.downloads import (
+    get_download_formats,
+    download_video_file,
+    split_video_file,
+)
 
 logger = logging.getLogger(__name__)
 ITEMS_PER_PAGE = 5
@@ -40,6 +46,7 @@ SESSION_STATE_PREFIX = "telegram:state:"
 SESSION_CHANNEL_PREFIX = "telegram:channel:"
 SESSION_PLAYLIST_PREFIX = "telegram:playlist:"
 SESSION_VIDEO_PREFIX = "telegram:video:"
+SESSION_DOWNLOAD_PREFIX = "telegram:download:"
 
 
 def _parse_playlist_id(user_input: str) -> str | None:
@@ -396,10 +403,12 @@ async def handle_callback_query(update: Update) -> None:
         # Otherwise we expect a stored channel or playlist session for pagination
         user_channel_key = f"{SESSION_CHANNEL_PREFIX}{query.from_user.id}"
         user_playlist_key = f"{SESSION_PLAYLIST_PREFIX}{query.from_user.id}"
+        user_video_key = f"{SESSION_VIDEO_PREFIX}{query.from_user.id}"
         channel_data = await get_cache(user_channel_key)
         playlist_data = await get_cache(user_playlist_key)
+        video_data = await get_cache(user_video_key)
 
-        if not channel_data and not playlist_data:
+        if not channel_data and not playlist_data and not video_data:
             await query.edit_message_text("❌ Session expired. Please search for a channel or playlist again.")
             return
 
@@ -452,6 +461,7 @@ async def handle_callback_query(update: Update) -> None:
                 page,
                 return_callback=return_callback,
                 channel_callback=channel_callback,
+                playlist_id=playlist_id,
             )
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
             return
@@ -524,6 +534,124 @@ async def handle_callback_query(update: Update) -> None:
             except Exception as exc:
                 logger.exception("Error fetching channel from direct video")
                 await query.edit_message_text(f"❌ Error: {html_escape(str(exc))}")
+        elif data.startswith("download_video_"):
+            payload = data[len("download_video_"):]
+            if "_playlist_" in payload:
+                video_id, rest = payload.split("_playlist_", 1)
+                playlist_id, page_text = rest.rsplit("_", 1)
+            else:
+                video_id, page_text = payload.rsplit("_", 1)
+                playlist_id = None
+
+            video = None
+            if playlist_id and playlist_data:
+                video = next(
+                    (
+                        item
+                        for item in playlist_data.get("items", [])
+                        if item.get("video_id") == video_id
+                    ),
+                    None,
+                )
+            if not video and channel_data:
+                video = next((v for v in videos if v["video_id"] == video_id), None)
+            if not video and video_data and video_data.get("video_id") == video_id:
+                video = video_data["info"]
+
+            if not video:
+                await query.edit_message_text("❌ Video not found or session expired.")
+                return
+
+            download_url = video.get("url") or f"https://youtube.com/watch?v={video_id}"
+            formats = await get_download_formats(download_url)
+            if not formats:
+                await query.edit_message_text(
+                    "❌ Unable to find download quality options under 50MB for this video."
+                )
+                return
+
+            download_state = {
+                "video_id": video_id,
+                "url": download_url,
+                "title": video.get("title", "Video"),
+                "formats": {str(i): fmt["format_id"] for i, fmt in enumerate(formats)},
+            }
+            download_state_key = f"{SESSION_DOWNLOAD_PREFIX}{query.from_user.id}"
+            await set_cache(download_state_key, download_state, ttl=300)
+
+            keyboard_rows = [
+                [InlineKeyboardButton(fmt["label"], callback_data=f"download_quality_{video_id}_{i}")]
+                for i, fmt in enumerate(formats)
+            ]
+            keyboard_rows.append([InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")])
+
+            await query.edit_message_text(
+                f"<b>Select quality to download:</b>\n{html_escape(video.get('title', 'Video'))}",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(keyboard_rows),
+            )
+            return
+        elif data.startswith("download_quality_"):
+            payload = data[len("download_quality_"):]
+            video_id, option_key = payload.split("_", 1)
+            download_state_key = f"{SESSION_DOWNLOAD_PREFIX}{query.from_user.id}"
+            download_state = await get_cache(download_state_key)
+            if not download_state or download_state.get("video_id") != video_id:
+                await query.edit_message_text("❌ Download session expired. Please try again.")
+                return
+
+            format_id = download_state.get("formats", {}).get(option_key)
+            if not format_id:
+                await query.edit_message_text("❌ Invalid download option selected.")
+                return
+
+            await query.edit_message_text(
+                "🔽 Downloading video now... This may take a moment."
+            )
+            file_path = None
+            part_paths: list[str] = []
+            try:
+                file_path = await download_video_file(download_state["url"], format_id)
+                file_size = os.path.getsize(file_path)
+                if file_size <= 45 * 1024 * 1024:
+                    part_paths = [file_path]
+                else:
+                    part_paths = await split_video_file(file_path)
+                    try:
+                        os.remove(file_path)
+                    except OSError:
+                        pass
+
+                for index, part_path in enumerate(part_paths, start=1):
+                    if os.path.getsize(part_path) > 45 * 1024 * 1024:
+                        raise RuntimeError(
+                            f"Part {index} exceeds Telegram's 45MB limit"
+                        )
+                    with open(part_path, "rb") as part_handle:
+                        await query.message.reply_video(
+                            video=part_handle,
+                            caption=f"Part {index} of {len(part_paths)}",
+                        )
+                await query.edit_message_text(
+                    "✅ Download complete. The video has been sent in chat."
+                )
+            except Exception as exc:
+                logger.exception("Error downloading video")
+                await query.edit_message_text(f"❌ Download failed: {html_escape(str(exc))}")
+            finally:
+                try:
+                    cleanup_files = [file_path] if file_path else []
+                    cleanup_files.extend(part_paths)
+                    for path in cleanup_files:
+                        if path and os.path.exists(path):
+                            os.remove(path)
+                    if file_path:
+                        temp_dir = os.path.dirname(file_path)
+                        if os.path.isdir(temp_dir) and not os.listdir(temp_dir):
+                            os.rmdir(temp_dir)
+                except Exception:
+                    pass
+            return
         elif data == "description_more":
             message, keyboard = format_full_description(info)
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
@@ -583,7 +711,13 @@ async def handle_callback_query(update: Update) -> None:
                 await query.edit_message_text("❌ Video not found or session expired.")
                 return
             stats = await get_video_stats(video_id)
-            message, keyboard = format_video_detail(video, stats, page, return_callback=return_callback)
+            message, keyboard = format_video_detail(
+                video,
+                stats,
+                page,
+                return_callback=return_callback,
+                playlist_id=playlist_id,
+            )
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
         elif data.startswith("playlists_"):
             page = int(data.split("_")[1])

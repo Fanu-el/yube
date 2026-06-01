@@ -6,6 +6,7 @@ google-api-python-client>=2.89.0
 redis>=5.0.0
 pydantic-settings>=2.0.0
 gunicorn==26.0.0
+yt-dlp>=2026.1.0
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 httpx>=0.25.0

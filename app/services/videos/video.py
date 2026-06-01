@@ -51,6 +51,7 @@ def format_video_detail(
     page: int,
     return_callback: str | None = None,
     channel_callback: str = "channel_info",
+    playlist_id: str | None = None,
 ) -> tuple[str, InlineKeyboardMarkup]:
     """Format video detail message with stats and navigation buttons."""
     title = html_escape(video["title"])
@@ -73,11 +74,18 @@ def format_video_detail(
     if return_callback is None:
         return_callback = f"videos_{page}"
 
+    download_callback = (
+        f"download_video_{video['video_id']}_{page}"
+        if playlist_id is None
+        else f"download_video_{video['video_id']}_playlist_{playlist_id}_{page}"
+    )
+
     back_text = "🔙 Videos"
     if return_callback and return_callback.startswith("playlist_items"):
         back_text = "🔙 Playlist"
 
     keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬇️ Download", callback_data=download_callback)],
         [
             InlineKeyboardButton(back_text, callback_data=return_callback),
             InlineKeyboardButton("🔙 Channel", callback_data=channel_callback),
