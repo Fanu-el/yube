@@ -3,6 +3,8 @@ import re
 from typing import List
 from urllib.parse import urlparse, parse_qs
 
+import os
+
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.utils import html_escape
@@ -74,6 +76,8 @@ def format_video_detail(
     if return_callback is None:
         return_callback = f"videos_{page}"
 
+    # Optionally show the download button. Hidden by default to keep feature off.
+    enable_downloads = os.environ.get("ENABLE_DOWNLOADS", "0").lower() in ("1", "true", "yes")
     download_callback = (
         f"download_video_{video['video_id']}_{page}"
         if playlist_id is None
@@ -84,14 +88,16 @@ def format_video_detail(
     if return_callback and return_callback.startswith("playlist_items"):
         back_text = "🔙 Playlist"
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⬇️ Download", callback_data=download_callback)],
-        [
-            InlineKeyboardButton(back_text, callback_data=return_callback),
-            InlineKeyboardButton("🔙 Channel", callback_data=channel_callback),
-        ],
-        [InlineKeyboardButton("🏠 Home", callback_data="action_home")],
+    keyboard_rows = []
+    if enable_downloads:
+        keyboard_rows.append([InlineKeyboardButton("⬇️ Download", callback_data=download_callback)])
+    keyboard_rows.append([
+        InlineKeyboardButton(back_text, callback_data=return_callback),
+        InlineKeyboardButton("🔙 Channel", callback_data=channel_callback),
     ])
+    keyboard_rows.append([InlineKeyboardButton("🏠 Home", callback_data="action_home")])
+
+    keyboard = InlineKeyboardMarkup(keyboard_rows)
     return message, keyboard
 
 

@@ -11,6 +11,9 @@ from yt_dlp import YoutubeDL
 
 MAX_TELEGRAM_VIDEO_BYTES = 45 * 1024 * 1024
 
+# Optional cookies file for yt-dlp (exported cookies.txt from browser)
+YTDL_COOKIES_FILE = os.environ.get("YTDL_COOKIES_FILE") or os.environ.get("YT_COOKIES_FILE")
+
 
 def _format_file_size(size: int | None) -> str:
     if size is None:
@@ -70,6 +73,8 @@ def _extract_video_info(url: str) -> dict:
         "skip_download": True,
         "no_warnings": True,
     }
+    if YTDL_COOKIES_FILE:
+        ydl_opts["cookiefile"] = YTDL_COOKIES_FILE
     with YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(url, download=False)
 
@@ -89,6 +94,8 @@ def _download_video_sync(url: str, format_id: str) -> str:
         "no_warnings": True,
         "noplaylist": True,
     }
+    if YTDL_COOKIES_FILE:
+        ydl_opts["cookiefile"] = YTDL_COOKIES_FILE
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
 
