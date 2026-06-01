@@ -4,7 +4,9 @@ from telegram import Update
 from telegram.constants import ParseMode
 
 from app.services.channels.handlers import (
+    format_about_message,
     format_channel_info,
+    format_help_message,
     format_main_menu,
     format_playlist_items_page,
     format_playlists_page,
@@ -18,7 +20,9 @@ from app.services.videos import (
 )
 
 __all__ = [
+    "format_about_message",
     "format_channel_info",
+    "format_help_message",
     "format_main_menu",
     "format_playlist_items_page",
     "format_video_detail",
@@ -38,20 +42,22 @@ async def handle_start_command(update: Update) -> None:
     """Handle /start command."""
     welcome_message = (
         "👋 <b>Welcome to yube!</b>\n\n"
-        "I help you discover YouTube channel information quickly.\n\n"
-        "<b>How to use:</b>\n"
-        "Just send me a channel name, URL, or channel ID and I'll show you:\n"
-        "• 👥 Subscriber count\n"
-        "• 🎬 Total videos\n"
-        "• 👁 Total views\n"
-        "• 📋 Top playlists\n"
-        "• ✨ Latest uploads\n\n"
+        "Discover YouTube channels, playlists, and videos in one place.\n\n"
+        "<b>What you can do:</b>\n"
+        "• Search channels by name, URL, or channel ID\n"
+        "• Browse playlists with pagination\n"
+        "• Open video details and previews\n"
+        "• Use direct playlist/video URLs or IDs\n\n"
+        "<b>Features:</b>\n"
+        "• 🎬 Channel stats and description\n"
+        "• 📋 Playlist overview and item navigation\n"
+        "• ▶ Video details with thumbnail previews\n\n"
         "<b>Commands:</b>\n"
         "/start - Show this welcome message\n"
-        "/help - Show help information\n"
+        "/help - Usage instructions\n"
         "/about - About this bot\n\n"
         "<b>Example:</b>\n"
-        "Send: <code>@YouTube</code>"
+        "Send: <code>YouTube</code> or <code>https://youtube.com/playlist?list=PL...</code>"
     )
     await update.message.reply_text(welcome_message, parse_mode=ParseMode.HTML)
 
@@ -66,13 +72,14 @@ async def handle_help_command(update: Update) -> None:
         "   • youtube.com/channel/UCxxxxx\n"
         "   • youtube.com/c/ChannelName\n"
         "   • youtube.com/@ChannelHandle\n"
-        "3️⃣ <b>Channel ID:</b> Send a channel ID starting with UC (e.g., <code>UCkRfArvrzheW2E7b6SVV8Jg</code>)\n\n"
+        "3️⃣ <b>Channel ID:</b> Send a channel ID starting with UC\n"
+        "4️⃣ <b>Playlist URL/ID:</b> Send a playlist URL or playlist ID\n"
+        "5️⃣ <b>Video URL/ID:</b> Send a video URL or video ID\n\n"
         "<b>What you'll get:</b>\n"
-        "• Channel statistics (subscribers, videos, views)\n"
-        "• Channel description\n"
-        "• Top playlists with video counts\n"
-        "• Latest 5 uploaded videos\n\n"
-        "<b>All results include clickable links!</b>"
+        "• Channel statistics, description, and uploads\n"
+        "• Playlist details and item navigation\n"
+        "• Video details, thumbnails, and playback links\n\n"
+        "<b>Need quick actions?</b> Use /menu or click the buttons in chat."
     )
     await update.message.reply_text(help_message, parse_mode=ParseMode.HTML)
 

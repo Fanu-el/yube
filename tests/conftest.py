@@ -67,6 +67,7 @@ def mock_channel_info():
         "subscribers": "1000000",
         "total_videos": "500",
         "total_views": "50000000",
+        "thumbnail": "https://example.com/channel.jpg",
         "uploads_playlist_id": "UUtest123",
     }
 
