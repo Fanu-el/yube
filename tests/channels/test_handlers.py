@@ -1,4 +1,4 @@
-"""Tests for telegram service handlers and formatting."""
+"""Tests for channel service handlers and formatting."""
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from telegram.constants import ParseMode
@@ -7,20 +7,15 @@ from app.services.telegram import (
     format_channel_info,
     format_main_menu,
     format_playlist_items_page,
-    format_video_detail,
     format_playlists_page,
-    format_videos_page,
-    handle_start_command,
-    handle_help_command,
-    handle_about_command,
     handle_channel,
     handle_callback_query,
     handle_inline_query,
 )
 
 
-class TestFormatFunctions:
-    """Test message formatting functions."""
+class TestFormatChannelFunctions:
+    """Test channel message formatting functions."""
     
     def test_format_channel_info(self, mock_channel_info):
         """Test channel info formatting."""
@@ -114,72 +109,6 @@ class TestFormatFunctions:
         assert not any(data.startswith("playlist_items_") and "playlist_items_direct_" not in data for data in callback_data)
         assert any(data == "direct_playlist_channel" for data in callback_data)
         assert all(len(row) <= 2 for row in keyboard.inline_keyboard)
-    
-    def test_format_videos_page(self, mock_videos):
-        """Test videos pagination."""
-        message, keyboard = format_videos_page(mock_videos, 0)
-        
-        assert "✨ Latest Videos" in message
-        assert "Page 1 of 5" in message  # 25 videos / 5 per page = 5 pages
-        assert "Video 1" in message
-        buttons = [btn.text for row in keyboard.inline_keyboard for btn in row]
-        assert any(btn_text.startswith("▶") for btn_text in buttons)
-
-    def test_format_video_detail(self, mock_videos):
-        """Test video detail formatting."""
-        stats = {
-            "views": "1234",
-            "likes": "100",
-            "comments": "5",
-            "duration": "3:45",
-            "published_at": "2024-01-01T00:00:00Z",
-        }
-        message, keyboard = format_video_detail(mock_videos[0], stats, 0)
-
-        assert "▶ Video 1" in message
-        assert "⏱ Duration:" in message
-        assert "👁 Views:" in message
-        assert "🔙 Videos" in [btn.text for row in keyboard.inline_keyboard for btn in row]
-
-
-class TestCommandHandlers:
-    """Test command handler functions."""
-    
-    @pytest.mark.asyncio
-    async def test_handle_start_command(self, mock_update_message):
-        """Test /start command."""
-        mock_update_message.message.reply_text = AsyncMock()
-        
-        await handle_start_command(mock_update_message)
-        
-        mock_update_message.message.reply_text.assert_called_once()
-        call_args = mock_update_message.message.reply_text.call_args
-        assert "Welcome to yube" in call_args[0][0]
-        assert ParseMode.HTML in call_args[1].values()
-    
-    @pytest.mark.asyncio
-    async def test_handle_help_command(self, mock_update_message):
-        """Test /help command."""
-        mock_update_message.message.reply_text = AsyncMock()
-        
-        await handle_help_command(mock_update_message)
-        
-        mock_update_message.message.reply_text.assert_called_once()
-        call_args = mock_update_message.message.reply_text.call_args
-        assert "How to use yube" in call_args[0][0]
-        assert "Channel name" in call_args[0][0]
-    
-    @pytest.mark.asyncio
-    async def test_handle_about_command(self, mock_update_message):
-        """Test /about command."""
-        mock_update_message.message.reply_text = AsyncMock()
-        
-        await handle_about_command(mock_update_message)
-        
-        mock_update_message.message.reply_text.assert_called_once()
-        call_args = mock_update_message.message.reply_text.call_args
-        assert "About yube" in call_args[0][0]
-        assert "FastAPI" in call_args[0][0]
 
 
 class TestChannelHandler:
@@ -308,34 +237,6 @@ class TestChannelHandler:
                             assert mock_update_message.message.reply_text.call_count >= 2
 
     @pytest.mark.asyncio
-    async def test_handle_direct_video_lookup(self, mock_update_message):
-        """Test direct video URL/ID lookup flow."""
-        mock_update_message.message.text = "https://youtube.com/watch?v=dQw4w9WgXcQ"
-        mock_update_message.message.reply_text = AsyncMock()
-        mock_update_message.message.from_user.id = 123
-
-        with patch("app.services.channels.handlers.get_cache", new_callable=AsyncMock) as mock_get_cache:
-            mock_get_cache.return_value = {"awaiting": "video_search"}
-            with patch("app.services.channels.handlers.get_video_info", new_callable=AsyncMock) as mock_info:
-                with patch("app.services.channels.handlers.set_cache", new_callable=AsyncMock):
-                    mock_info.return_value = {
-                        "video_id": "dQw4w9WgXcQ",
-                        "title": "Test Video",
-                        "url": "https://youtube.com/watch?v=dQw4w9WgXcQ",
-                        "channel_id": "UCtestchannel",
-                        "views": "1234567",
-                        "likes": "100000",
-                        "comments": "50000",
-                        "duration": "3:33",
-                        "published_at": "2024-01-01T00:00:00Z",
-                    }
-
-                    await handle_channel(mock_update_message)
-
-                    mock_info.assert_called_once_with("dQw4w9WgXcQ")
-                    assert mock_update_message.message.reply_text.call_count >= 2
-
-    @pytest.mark.asyncio
     async def test_handle_channel_lookup_error(self, mock_update_message):
         """Test channel lookup error handling."""
         mock_update_message.message.text = "NonExistentChannel12345"
@@ -352,7 +253,6 @@ class TestChannelHandler:
 
                     call_args = mock_update_message.message.reply_text.call_args
                     assert "❌ Error" in call_args[0][0]
-    
 
 
 class TestCallbackHandler:

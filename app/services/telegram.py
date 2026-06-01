@@ -7,12 +7,14 @@ from app.services.channels.handlers import (
     format_channel_info,
     format_main_menu,
     format_playlist_items_page,
-    format_video_detail,
     format_playlists_page,
-    format_videos_page,
     handle_callback_query,
     handle_inline_query,
     handle_channel,
+)
+from app.services.videos import (
+    format_video_detail,
+    format_videos_page,
 )
 
 __all__ = [

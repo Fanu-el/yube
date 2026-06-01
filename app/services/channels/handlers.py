@@ -19,6 +19,7 @@ from app.services.youtube import (
     get_channel_info,
     get_latest_videos,
     get_video_stats,
+    get_video_info,
     resolve_channel_id,
 )
 from app.services.playlists import (
@@ -27,12 +28,18 @@ from app.services.playlists import (
     get_playlists,
     resolve_playlist_id,
 )
+from app.services.videos import (
+    parse_video_id,
+    format_video_detail,
+    format_videos_page,
+)
 
 logger = logging.getLogger(__name__)
 ITEMS_PER_PAGE = 5
 SESSION_STATE_PREFIX = "telegram:state:"
 SESSION_CHANNEL_PREFIX = "telegram:channel:"
 SESSION_PLAYLIST_PREFIX = "telegram:playlist:"
+SESSION_VIDEO_PREFIX = "telegram:video:"
 
 
 def _parse_playlist_id(user_input: str) -> str | None:
@@ -63,15 +70,18 @@ def format_main_menu() -> tuple[str, InlineKeyboardMarkup]:
     message = (
         "<b>🏠 Main Menu</b>\n\n"
         "Choose a feature to get started.\n"
-        "Use the buttons below to search channels or playlists directly.\n\n"
-        "You can also paste a playlist URL or playlist ID directly.\n"
-        "Example: <code>https://youtube.com/playlist?list=PL...</code>\n"
-        "or <code>PL...</code>"
+        "Use the buttons below to search channels, playlists, or videos directly.\n\n"
+        "You can also paste URLs or IDs directly:\n"
+        "• Playlist: <code>https://youtube.com/playlist?list=PL...</code> or <code>PL...</code>\n"
+        "• Video: <code>https://youtube.com/watch?v=...</code> or <code>11-char ID</code>"
     )
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🔎 Channels", callback_data="action_channels"),
             InlineKeyboardButton("📋 Playlists", callback_data="action_playlists"),
+        ],
+        [
+            InlineKeyboardButton("▶ Videos", callback_data="action_videos"),
         ],
         [InlineKeyboardButton("❓ Help", callback_data="action_help")],
         [InlineKeyboardButton("ℹ️ About", callback_data="action_about")],
@@ -313,85 +323,6 @@ def format_playlist_items_page(
     return message, keyboard
 
 
-def format_video_detail(
-    video: dict,
-    stats: dict,
-    page: int,
-    return_callback: str | None = None,
-    channel_callback: str = "channel_info",
-) -> tuple[str, InlineKeyboardMarkup]:
-    title = html_escape(video["title"])
-    duration = html_escape(stats.get("duration", "N/A"))
-    published = stats.get("published_at")
-    published_text = html_escape(published.split("T")[0]) if published else "Unknown"
-
-    message = (
-        f"<b>▶ {title}</b>\n\n"
-        f"<b>📅 Published:</b> {published_text}\n"
-        f"<b>⏱ Duration:</b> {duration}\n"
-        f"<b>👁 Views:</b> <b>{int(stats.get('views', '0')):,}</b>\n"
-        f"<b>👍 Likes:</b> <b>{int(stats.get('likes', '0')):,}</b>\n"
-        f"<b>💬 Comments:</b> <b>{int(stats.get('comments', '0')):,}</b>\n\n"
-        f"<a href=\"{html_escape(video['url'])}\">Watch on YouTube</a>"
-    )
-
-    if return_callback is None:
-        return_callback = f"videos_{page}"
-
-    back_text = "🔙 Videos"
-    if return_callback and return_callback.startswith("playlist_items"):
-        back_text = "🔙 Playlist"
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(back_text, callback_data=return_callback),
-            InlineKeyboardButton("🔙 Channel", callback_data=channel_callback),
-        ],
-        [InlineKeyboardButton("🏠 Home", callback_data="action_home")],
-    ])
-    return message, keyboard
-
-
-def format_videos_page(videos: List[dict], page: int) -> tuple[str, InlineKeyboardMarkup]:
-    """Format videos page with pagination."""
-    total_pages = (len(videos) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
-    start_idx = page * ITEMS_PER_PAGE
-    end_idx = min(start_idx + ITEMS_PER_PAGE, len(videos))
-
-    page_videos = videos[start_idx:end_idx]
-
-    video_lines = "\n".join(
-        f"<b>{i + start_idx + 1}.</b> <a href=\"{html_escape(video['url'])}\">{html_escape(video['title'])}</a>"
-        for i, video in enumerate(page_videos)
-    ) or "No videos found."
-
-    message = (
-        f"<b>✨ Latest Videos</b>\n\n"
-        f"{video_lines}\n\n"
-        f"<b>Page {page + 1} of {total_pages}</b> (showing {end_idx - start_idx} of {len(videos)})"
-    )
-
-    keyboard_rows = [
-        [InlineKeyboardButton(
-            f"▶ {html_escape(video['title'])[:30]}",
-            callback_data=f"video_{video['video_id']}_{page}",
-        )]
-        for video in page_videos
-    ]
-
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"videos_{page - 1}"))
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"videos_{page + 1}"))
-    nav_buttons.append(InlineKeyboardButton("🔙 Channel", callback_data="channel_info"))
-    nav_buttons.append(InlineKeyboardButton("🏠 Home", callback_data="action_home"))
-    keyboard_rows.append(nav_buttons)
-
-    keyboard = InlineKeyboardMarkup(keyboard_rows)
-    return message, keyboard
-
-
 async def handle_callback_query(update: Update) -> None:
     """Handle inline button callbacks for channel flows."""
     query = update.callback_query
@@ -418,6 +349,15 @@ async def handle_callback_query(update: Update) -> None:
             await set_cache(state_key, {"awaiting": "playlist_search"}, ttl=300)
             await query.edit_message_text(
                 "Please send the playlist URL or playlist ID now.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")]]),
+            )
+            return
+
+        if data == "action_videos":
+            state_key = f"{SESSION_STATE_PREFIX}{query.from_user.id}"
+            await set_cache(state_key, {"awaiting": "video_search"}, ttl=300)
+            await query.edit_message_text(
+                "Please send the video URL or video ID now.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")]]),
             )
             return
@@ -538,6 +478,44 @@ async def handle_callback_query(update: Update) -> None:
                 await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
             except Exception as exc:
                 logger.exception("Error fetching channel from direct playlist")
+                await query.edit_message_text(f"❌ Error: {html_escape(str(exc))}")
+        elif data == "video_info_direct":
+            user_video_key = f"{SESSION_VIDEO_PREFIX}{query.from_user.id}"
+            video_data = await get_cache(user_video_key)
+            if not video_data:
+                await query.edit_message_text("❌ Session expired. Please search for a video again.")
+                return
+            video_info = video_data["info"]
+            stats = video_info
+            message, keyboard = format_video_detail(video_info, stats, page=0, return_callback="video_info_direct")
+            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        elif data == "direct_video_channel":
+            user_video_key = f"{SESSION_VIDEO_PREFIX}{query.from_user.id}"
+            video_data = await get_cache(user_video_key)
+            if not video_data:
+                await query.edit_message_text("❌ Session expired. Please search for a video again.")
+                return
+            channel_id = video_data.get("channel_id")
+            if not channel_id:
+                await query.edit_message_text("❌ Channel information not available.")
+                return
+            try:
+                channel_info = await get_channel_info(channel_id)
+                playlists = await get_playlists(channel_id)
+                videos = await get_latest_videos(channel_id, max_results=50)
+                # Store channel data for pagination
+                user_channel_key = f"{SESSION_CHANNEL_PREFIX}{query.from_user.id}"
+                channel_data = {
+                    "channel_id": channel_id,
+                    "info": channel_info,
+                    "playlists": playlists,
+                    "videos": videos,
+                }
+                await set_cache(user_channel_key, channel_data, ttl=3600)
+                message, keyboard = format_channel_info(channel_info, len(playlists), len(videos))
+                await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            except Exception as exc:
+                logger.exception("Error fetching channel from direct video")
                 await query.edit_message_text(f"❌ Error: {html_escape(str(exc))}")
         elif data == "description_more":
             message, keyboard = format_full_description(info)
@@ -674,6 +652,12 @@ async def handle_channel(update: Update) -> None:
         except Exception:
             playlist_id = candidate
 
+    # Check for direct video URLs or IDs
+    video_id = None
+    video_candidate = parse_video_id(user_input)
+    if video_candidate:
+        video_id = video_candidate
+
     # Check if user is in an awaiting state (e.g., clicked Channels or Playlists and should send query)
     state_key = f"{SESSION_STATE_PREFIX}{update.message.from_user.id}"
     state = await get_cache(state_key)
@@ -683,6 +667,43 @@ async def handle_channel(update: Update) -> None:
         if not playlist_id:
             await update.message.reply_text("❌ Please send a valid playlist URL or playlist ID.")
             return
+
+    if state and state.get("awaiting") == "video_search":
+        await set_cache(state_key, None, ttl=1)
+        if not video_id:
+            await update.message.reply_text("❌ Please send a valid video URL or video ID.")
+            return
+
+    if video_id:
+        await update.message.reply_text("🔍 Looking up video...")
+        try:
+            video_info = await get_video_info(video_id)
+            user_video_key = f"{SESSION_VIDEO_PREFIX}{update.message.from_user.id}"
+            video_data = {
+                "video_id": video_id,
+                "info": video_info,
+                "channel_id": video_info.get("channel_id"),
+            }
+            await set_cache(user_video_key, video_data, ttl=3600)
+
+            stats = video_info
+            message, keyboard = format_video_detail(
+                video_info,
+                stats,
+                page=0,
+                return_callback="video_info_direct",
+                channel_callback="direct_video_channel",
+            )
+            await update.message.reply_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
+        except Exception as exc:
+            logger.exception("Error handling video lookup")
+            await update.message.reply_text(f"❌ Error: {html_escape(str(exc))}")
+        return
 
     if playlist_id:
         await update.message.reply_text("🔍 Looking up playlist...")
