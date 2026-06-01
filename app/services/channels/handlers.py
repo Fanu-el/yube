@@ -741,13 +741,57 @@ async def handle_inline_query(update: Update) -> None:
         return
 
     try:
-        # Resolve channel id and fetch details
-        channel_id = await resolve_channel_id(query_text)
-        info = await get_channel_info(channel_id)
-        # Build a single article result with the channel info
-        message, _ = format_channel_info(info, 0, 0)
-        content = InputTextMessageContent(message, parse_mode=ParseMode.HTML)
-        result = InlineQueryResultArticle(id=str(uuid4()), title=info.get("name", "Channel"), input_message_content=content, description=f"Subscribers: {int(info.get('subscribers',0)):,}")
+        result = None
+
+        # Video URLs or IDs should resolve to a video result first.
+        video_id = parse_video_id(query_text)
+        if video_id:
+            info = await get_video_info(video_id)
+            message = (
+                f"<b>▶ {html_escape(info['title'])}</b>\n\n"
+                f"<b>Channel:</b> {html_escape(info.get('channel_title', 'Unknown'))}\n"
+                f"<b>Duration:</b> {html_escape(info.get('duration', 'N/A'))}\n"
+                f"<b>Views:</b> <b>{int(info.get('views', '0')):,}</b>\n"
+                f"<a href=\"{html_escape(info['url'])}\">Watch on YouTube</a>"
+            )
+            content = InputTextMessageContent(message, parse_mode=ParseMode.HTML)
+            result = InlineQueryResultArticle(
+                id=str(uuid4()),
+                title=f"Video: {info['title']}",
+                input_message_content=content,
+                description=f"Video from {info.get('channel_title', 'YouTube')}"
+            )
+        else:
+            # Playlist URLs or IDs should resolve to a playlist result next.
+            try:
+                playlist_id = await resolve_playlist_id(query_text)
+                playlist_info = await get_playlist_info(playlist_id)
+                message = (
+                    f"<b>📋 {html_escape(playlist_info['title'])}</b>\n\n"
+                    f"<b>Items:</b> {int(playlist_info.get('item_count', 0)):,}\n"
+                    f"<b>Channel:</b> {html_escape(playlist_info.get('channel_title', 'Unknown'))}\n"
+                    f"<a href=\"{html_escape(playlist_info['url'])}\">Open playlist on YouTube</a>"
+                )
+                content = InputTextMessageContent(message, parse_mode=ParseMode.HTML)
+                result = InlineQueryResultArticle(
+                    id=str(uuid4()),
+                    title=f"Playlist: {playlist_info['title']}",
+                    input_message_content=content,
+                    description=f"Playlist by {playlist_info.get('channel_title', 'YouTube')}"
+                )
+            except Exception:
+                # Fallback to channel search for any other query text.
+                channel_id = await resolve_channel_id(query_text)
+                channel_info = await get_channel_info(channel_id)
+                message, _ = format_channel_info(channel_info, 0, 0)
+                content = InputTextMessageContent(message, parse_mode=ParseMode.HTML)
+                result = InlineQueryResultArticle(
+                    id=str(uuid4()),
+                    title=channel_info.get("name", "Channel"),
+                    input_message_content=content,
+                    description=f"Subscribers: {int(channel_info.get('subscribers', 0)):,}"
+                )
+
         await inline.answer([result], cache_time=60)
     except Exception:
         await inline.answer([], cache_time=5)
