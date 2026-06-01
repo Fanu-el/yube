@@ -304,7 +304,7 @@ def format_playlist_items_page(
         InlineKeyboardButton(back_text, callback_data=back_callback),
         InlineKeyboardButton(
             "🔙 Channel",
-            callback_data=("playlist_info_direct" if direct else "channel_info"),
+            callback_data=("direct_playlist_channel" if direct else "channel_info"),
         ),
     ])
     keyboard_rows.append([InlineKeyboardButton("🏠 Home", callback_data="action_home")])
@@ -491,7 +491,7 @@ async def handle_callback_query(update: Update) -> None:
                 await query.edit_message_text("❌ Video not found or session expired.")
                 return
             stats = await get_video_stats(video_id)
-            channel_callback = "playlist_info_direct" if "playlist_direct" in data else "channel_info"
+            channel_callback = "direct_playlist_channel" if "_playlist_direct_" in data else "channel_info"
             message, keyboard = format_video_detail(
                 video,
                 stats,
@@ -508,6 +508,33 @@ async def handle_callback_query(update: Update) -> None:
         elif data == "playlist_info_direct":
             message, keyboard = format_playlist_info(playlist_data["info"])
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        elif data == "direct_playlist_channel":
+            if not playlist_data:
+                await query.edit_message_text("❌ Session expired. Please search for a playlist again.")
+                return
+            channel_id = playlist_data.get("channel_id")
+            if not channel_id:
+                await query.edit_message_text("❌ Channel information not available.")
+                return
+            try:
+                channel_info = await get_channel_info(channel_id)
+                playlists = await get_playlists(channel_id)
+                videos = await get_latest_videos(channel_id, max_results=50)
+                # Store channel data for pagination
+                user_channel_key = f"{SESSION_CHANNEL_PREFIX}{query.from_user.id}"
+                channel_data = {
+                    "channel_id": channel_id,
+                    "info": channel_info,
+                    "playlists": playlists,
+                    "videos": videos,
+                }
+                await set_cache(user_channel_key, channel_data, ttl=3600)
+                # Also keep the playlist data for navigation
+                message, keyboard = format_channel_info(channel_info, len(playlists), len(videos))
+                await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            except Exception as exc:
+                logger.exception("Error fetching channel from direct playlist")
+                await query.edit_message_text(f"❌ Error: {html_escape(str(exc))}")
         elif data == "description_more":
             message, keyboard = format_full_description(info)
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
@@ -662,6 +689,7 @@ async def handle_channel(update: Update) -> None:
             user_playlist_key = f"{SESSION_PLAYLIST_PREFIX}{update.message.from_user.id}"
             playlist_data = {
                 "playlist_id": playlist_id,
+                "channel_id": playlist_info.get("channel_id"),
                 "info": playlist_info,
                 "items": playlist_items,
             }

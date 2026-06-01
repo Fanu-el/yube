@@ -111,7 +111,7 @@ class TestFormatFunctions:
         callback_data = [btn.callback_data for row in keyboard.inline_keyboard for btn in row if btn.callback_data]
         assert any(data.startswith("playlist_items_direct_") for data in callback_data)
         assert not any(data.startswith("playlist_items_") and "playlist_items_direct_" not in data for data in callback_data)
-        assert any(data == "playlist_info_direct" for data in callback_data)
+        assert any(data == "direct_playlist_channel" for data in callback_data)
         assert all(len(row) <= 2 for row in keyboard.inline_keyboard)
     
     def test_format_videos_page(self, mock_videos):
