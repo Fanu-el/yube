@@ -158,3 +158,37 @@ async def get_video_stats(video_id: str) -> Dict[str, Any]:
         "duration": await _format_duration(video["contentDetails"].get("duration", "")),
         "published_at": video["snippet"].get("publishedAt"),
     }
+
+
+async def get_video_info(video_id: str) -> Dict[str, Any]:
+    """Get complete video info including channel and stats."""
+    cache_key = f"youtube:video:info:{video_id}"
+    cached = await get_cache(cache_key)
+    if cached:
+        return cached
+
+    request = youtube.videos().list(
+        part="snippet,statistics,contentDetails",
+        id=video_id,
+    )
+    response = await _execute_youtube(request)
+    items = response.get("items", [])
+    if not items:
+        raise ValueError("Video not found")
+
+    video = items[0]
+    result = {
+        "video_id": video_id,
+        "title": video["snippet"]["title"],
+        "url": f"https://youtube.com/watch?v={video_id}",
+        "views": video["statistics"].get("viewCount", "0"),
+        "likes": video["statistics"].get("likeCount", "0"),
+        "comments": video["statistics"].get("commentCount", "0"),
+        "duration": await _format_duration(video["contentDetails"].get("duration", "")),
+        "published_at": video["snippet"].get("publishedAt"),
+        "channel_id": video["snippet"]["channelId"],
+        "channel_title": video["snippet"]["channelTitle"],
+        "thumbnail": _get_thumbnail_url(video["snippet"].get("thumbnails", {})),
+    }
+    await set_cache(cache_key, result, ttl=900)
+    return result
