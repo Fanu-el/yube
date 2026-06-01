@@ -395,7 +395,11 @@ def format_videos_page(videos: List[dict], page: int) -> tuple[str, InlineKeyboa
 async def handle_callback_query(update: Update) -> None:
     """Handle inline button callbacks for channel flows."""
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        # Query may be too old; log and continue with message editing
+        logger.debug("Failed to answer callback query (possibly expired)")
     
     data = query.data
     try:
