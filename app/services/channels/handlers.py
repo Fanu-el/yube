@@ -480,15 +480,12 @@ async def handle_callback_query(update: Update) -> None:
                 logger.exception("Error fetching channel from direct playlist")
                 await query.edit_message_text(f"❌ Error: {html_escape(str(exc))}")
         elif data == "video_info_direct":
-            user_video_key = f"{SESSION_VIDEO_PREFIX}{query.from_user.id}"
-            video_data = await get_cache(user_video_key)
-            if not video_data:
-                await query.edit_message_text("❌ Session expired. Please search for a video again.")
-                return
-            video_info = video_data["info"]
-            stats = video_info
-            message, keyboard = format_video_detail(video_info, stats, page=0, return_callback="video_info_direct")
-            await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+            state_key = f"{SESSION_STATE_PREFIX}{query.from_user.id}"
+            await set_cache(state_key, {"awaiting": "video_search"}, ttl=300)
+            await query.edit_message_text(
+                "Please send the video URL or video ID now.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="action_cancel")]]),
+            )
         elif data == "direct_video_channel":
             user_video_key = f"{SESSION_VIDEO_PREFIX}{query.from_user.id}"
             video_data = await get_cache(user_video_key)
@@ -691,7 +688,7 @@ async def handle_channel(update: Update) -> None:
                 video_info,
                 stats,
                 page=0,
-                return_callback="video_info_direct",
+                return_callback="action_videos",
                 channel_callback="direct_video_channel",
             )
             await update.message.reply_text(

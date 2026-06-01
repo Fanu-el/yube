@@ -74,8 +74,6 @@ def format_video_detail(
     back_text = "🔙 Videos"
     if return_callback and return_callback.startswith("playlist_items"):
         back_text = "🔙 Playlist"
-    elif return_callback == "video_info_direct":
-        back_text = "🔙 Video"
 
     keyboard = InlineKeyboardMarkup([
         [
