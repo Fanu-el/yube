@@ -273,9 +273,9 @@ def format_playlist_items_page(
         for item in page_items
     ]
 
-    nav_buttons = []
+    page_nav_buttons = []
     if page > 0:
-        nav_buttons.append(
+        page_nav_buttons.append(
             InlineKeyboardButton(
                 "⬅️ Previous",
                 callback_data=(
@@ -286,7 +286,7 @@ def format_playlist_items_page(
             )
         )
     if page < total_pages - 1:
-        nav_buttons.append(
+        page_nav_buttons.append(
             InlineKeyboardButton(
                 "Next ➡️",
                 callback_data=(
@@ -296,18 +296,30 @@ def format_playlist_items_page(
                 ),
             )
         )
+    if page_nav_buttons:
+        keyboard_rows.append(page_nav_buttons)
 
     back_text = "🔙 Playlists" if back_callback == "playlists_0" else "🔙 Playlist"
-    nav_buttons.append(InlineKeyboardButton(back_text, callback_data=back_callback))
-    nav_buttons.append(InlineKeyboardButton("🔙 Channel", callback_data="channel_info"))
-    nav_buttons.append(InlineKeyboardButton("🏠 Home", callback_data="action_home"))
-    keyboard_rows.append(nav_buttons)
+    keyboard_rows.append([
+        InlineKeyboardButton(back_text, callback_data=back_callback),
+        InlineKeyboardButton(
+            "🔙 Channel",
+            callback_data=("playlist_info_direct" if direct else "channel_info"),
+        ),
+    ])
+    keyboard_rows.append([InlineKeyboardButton("🏠 Home", callback_data="action_home")])
 
     keyboard = InlineKeyboardMarkup(keyboard_rows)
     return message, keyboard
 
 
-def format_video_detail(video: dict, stats: dict, page: int, return_callback: str | None = None) -> tuple[str, InlineKeyboardMarkup]:
+def format_video_detail(
+    video: dict,
+    stats: dict,
+    page: int,
+    return_callback: str | None = None,
+    channel_callback: str = "channel_info",
+) -> tuple[str, InlineKeyboardMarkup]:
     title = html_escape(video["title"])
     duration = html_escape(stats.get("duration", "N/A"))
     published = stats.get("published_at")
@@ -333,7 +345,7 @@ def format_video_detail(video: dict, stats: dict, page: int, return_callback: st
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(back_text, callback_data=return_callback),
-            InlineKeyboardButton("🔙 Channel", callback_data="channel_info"),
+            InlineKeyboardButton("🔙 Channel", callback_data=channel_callback),
         ],
         [InlineKeyboardButton("🏠 Home", callback_data="action_home")],
     ])
@@ -479,7 +491,14 @@ async def handle_callback_query(update: Update) -> None:
                 await query.edit_message_text("❌ Video not found or session expired.")
                 return
             stats = await get_video_stats(video_id)
-            message, keyboard = format_video_detail(video, stats, page, return_callback=return_callback)
+            channel_callback = "playlist_info_direct" if "playlist_direct" in data else "channel_info"
+            message, keyboard = format_video_detail(
+                video,
+                stats,
+                page,
+                return_callback=return_callback,
+                channel_callback=channel_callback,
+            )
             await query.edit_message_text(message, parse_mode=ParseMode.HTML, reply_markup=keyboard)
             return
 
