@@ -97,6 +97,13 @@ class TestFormatFunctions:
         texts = [btn.text for row in keyboard.inline_keyboard for btn in row]
         assert any("Playlists" in t for t in texts)
         assert any("Channel" in t for t in texts)
+
+    def test_format_playlist_items_page_direct_callback_length(self, mock_playlist_items):
+        """Direct playlist item callback data should fit Telegram limits."""
+        _, keyboard = format_playlist_items_page(mock_playlist_items, 0, "PLtest123", "Test Playlist", direct=True)
+        callback_data = [btn.callback_data for row in keyboard.inline_keyboard for btn in row if btn.callback_data]
+        assert all(len(data) <= 64 for data in callback_data)
+        assert any("_playlist_direct_" in data for data in callback_data)
     
     def test_format_videos_page(self, mock_videos):
         """Test videos pagination."""

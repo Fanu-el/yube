@@ -264,7 +264,7 @@ def format_playlist_items_page(
             InlineKeyboardButton(
                 f"▶ {html_escape(item['title'])[:30]}",
                 callback_data=(
-                    f"video_{item['video_id']}_playlist_direct_{playlist_id}_{page}"
+                    f"video_{item['video_id']}_playlist_direct_{page}"
                     if direct
                     else f"video_{item['video_id']}_playlist_{playlist_id}_{page}"
                 ),
@@ -445,9 +445,9 @@ async def handle_callback_query(update: Update) -> None:
             return
         elif playlist_data and data.startswith("video_") and "_playlist_direct_" in data:
             payload = data[len("video_"):]
-            video_id, rest = payload.split("_playlist_direct_", 1)
-            playlist_id, page_text = rest.rsplit("_", 1)
+            video_id, page_text = payload.split("_playlist_direct_", 1)
             page = int(page_text)
+            playlist_id = playlist_data["playlist_id"]
             return_callback = f"playlist_items_direct_{playlist_id}_{page}"
             video = next(
                 (
